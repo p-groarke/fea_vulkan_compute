@@ -1,0 +1,18 @@
+[requires]
+gtest/1.10.0
+onetbb/2021.3.0
+stb/20200203
+spirv-cross/cci.20211113
+
+[generators]
+cmake_find_package_multi
+
+[options]
+gtest:build_gmock=False
+tbb:tbbmalloc=True
+#tbb:tbbproxy=True
+
+[imports]
+bin, *.pdb -> ./bin
+bin, *.pdb -> ./lib
+bin, *.dll -> ./bin
