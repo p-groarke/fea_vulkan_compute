@@ -71,10 +71,10 @@ struct vkc_impl {
 };
 } // namespace detail
 
-// vkc::vkc(const vkc&) = default;
 vkc::vkc(vkc&&) = default;
-// vkc& vkc::operator=(const vkc&) = default;
 vkc& vkc::operator=(vkc&&) = default;
+// vkc::vkc(const vkc&) = default;
+// vkc& vkc::operator=(const vkc&) = default;
 
 vkc::vkc() {
 	/*

@@ -46,8 +46,8 @@ TEST(vulkan_compute, basics) {
 	vkc::vkc gpu;
 
 	fea::bench::suite suite;
-	suite.title("Simulate GPU Modifier");
-	suite.benchmark("Mandelbrot generator (no push, just pull)", [&]() {
+	suite.title("GPU Tasks");
+	suite.benchmark("Mandelbrot generator (pull only)", [&]() {
 		vkc::task t{ gpu, shader_path.c_str() };
 
 		t.push_constant("p_constants", size);
@@ -61,25 +61,24 @@ TEST(vulkan_compute, basics) {
 	suite.print();
 
 
-	// Get the color data from the buffer, and cast it to bytes.
-	// We save the data to a vector.
-	std::vector<uint8_t> image;
-	image.resize(image_data.size() * 4);
+	// Save png.
+	{
+		std::vector<uint8_t> image;
+		image.resize(image_data.size() * 4);
 
-	for (size_t i = 0; i < image_data.size(); ++i) {
-		image[i * 4] = uint8_t(image_data[i].r * 255.f);
-		image[i * 4 + 1] = uint8_t(image_data[i].g * 255.f);
-		image[i * 4 + 2] = uint8_t(image_data[i].b * 255.f);
-		image[i * 4 + 3] = uint8_t(image_data[i].a * 255.f);
-	}
+		// Cast data to 8bit color.
+		for (size_t i = 0; i < image_data.size(); ++i) {
+			image[i * 4] = uint8_t(image_data[i].r * 255.f);
+			image[i * 4 + 1] = uint8_t(image_data[i].g * 255.f);
+			image[i * 4 + 2] = uint8_t(image_data[i].b * 255.f);
+			image[i * 4 + 3] = uint8_t(image_data[i].a * 255.f);
+		}
 
-	// Now we save the acquired color data to a .png.
-	int error = stbi_write_png("mandelbrot.png", int(size.width),
-			int(size.height), 4, image.data(), int(size.width) * 4);
-
-	if (error == 0) {
-		fprintf(stderr, "write_png error %d : %s\n", error,
-				stbi_failure_reason());
+		// Now we save the acquired color data to a .png.
+		if (!stbi_write_png("mandelbrot.png", int(size.width), int(size.height),
+					4, image.data(), int(size.width) * 4)) {
+			fprintf(stderr, "Write png error : %s\n", stbi_failure_reason());
+		}
 	}
 }
 } // namespace

@@ -14,33 +14,11 @@
 
 #include <fea/maps/unsigned_map.hpp>
 #include <fea/utils/file.hpp>
-#include <spirv_cross.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace vkc {
-// Helper structs.
 namespace {
-// A memory buffer.
-struct buffer_info {
-	uint32_t set_id = std::numeric_limits<uint32_t>::max();
-	uint32_t binding_id = std::numeric_limits<uint32_t>::max();
-
-	size_t push_cmd_buffer_id = std::numeric_limits<size_t>::max();
-	size_t pull_cmd_buffer_id = std::numeric_limits<size_t>::max();
-
-	size_t byte_size = 0;
-
-	// the staging buffer, accessible from cpu
-	vk::UniqueBuffer staging_buffer;
-	// memory that backs the staging buffer
-	vk::UniqueDeviceMemory staging_buffer_memory;
-
-	// the actual gpu buffer, not accessible from cpu
-	vk::UniqueBuffer gpu_buffer;
-	vk::UniqueDeviceMemory gpu_buffer_memory; // its memory
-};
-
-// A push constant (uniform).
+// A push constant (aka uniform).
 struct push_constant_info {
 	uint32_t set = std::numeric_limits<uint32_t>::max();
 	uint32_t binding = std::numeric_limits<uint32_t>::max();
@@ -48,8 +26,6 @@ struct push_constant_info {
 	size_t byte_size = 0;
 	const void* constant = nullptr;
 };
-
-
 } // namespace
 
 namespace detail {
@@ -93,28 +69,23 @@ struct task_impl {
 	queue. To allocate such command buffers, we use a command pool.
 	*/
 	vk::UniqueCommandPool command_pool;
-	std::vector<vk::CommandBuffer> command_buffers;
 
-	/*
-	The push_constants in the shader.
-	*/
+	// The push_constants in the shader (aka uniforms).
 	std::vector<vk::PushConstantRange> push_constants_ranges;
 
-	/*
-	Our buffers.
-	*/
+	// Our buffers.
 	fea::unsigned_map<set_id_t, transfer_buffer> transfer_buffers;
 
-	/*
-	string -> id
-	*/
+	// string -> id
 	std::unordered_map<std::string, set_id_t> buffer_name_to_set_id;
 	std::unordered_map<std::string, push_constant_info>
 			push_constants_name_to_info;
 
+	// The set working group sizes.
 	std::array<uint32_t, 3> workgroupsizes = { 1u, 1u, 1u };
 
-	size_t submit_cmd_buffer_id = std::numeric_limits<size_t>::max();
+	// The main submit command (aka, execute the shader cmd).
+	vk::CommandBuffer pipeline_submit_cmd;
 };
 } // namespace detail
 
@@ -241,10 +212,10 @@ void gather_uniform_descriptorsets(
 } // namespace
 
 task::~task() = default;
-// task::task(const task&) = default;
 task::task(task&&) = default;
-// task& task::operator=(const task&) = default;
 task& task::operator=(task&&) = default;
+// task::task(const task&) = default;
+// task& task::operator=(const task&) = default;
 
 task::task(vkc& vkc_inst, const wchar_t* shader_path)
 		: pimpl_ptr(&vkc_inst) {
@@ -253,24 +224,28 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 	// glslangValidator.exe -V shader.comp
 	std::filesystem::path shader_filepath = shader_path;
 	if (!std::filesystem::exists(shader_filepath)) {
+		fprintf(stderr, "File not found : '%s'\n",
+				shader_filepath.string().c_str());
 		throw std::invalid_argument{ std::string{ __FUNCTION__ }
 			+ " : Invalid shader path, file not found." };
 	}
 
-	std::vector<uint8_t> shader_data;
-
 	if (shader_filepath.extension() != ".spv") {
+		fprintf(stderr, "Provided file isn't compiled shader (.spv) : '%s'\n",
+				shader_filepath.string().c_str());
 		throw std::invalid_argument{ std::string{ __FUNCTION__ }
 			+ " : Provided shader not '.spv'. Task requires precompiled "
 			  "shaders." };
 	}
 
+	std::vector<uint8_t> shader_data;
 	if (!fea::open_binary_file(shader_filepath, shader_data)) {
 		fprintf(stderr, "Couldn't open shader file : '%s'\n",
 				shader_filepath.string().c_str());
 		throw std::runtime_error{ "Couldn't open shader file." };
 	}
 
+	// spirv compiler wants data as uint32_t, so pad with zeroes.
 	size_t padded_size = size_t(std::ceil(shader_data.size() / 4.0) * 4.0);
 	for (size_t i = shader_data.size(); i < padded_size; ++i) {
 		shader_data.push_back(0);
@@ -280,7 +255,6 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 	Use spriv_cross reflection to figure out what descriptor sets, bindings
 	and buffers we need.
 	*/
-
 	spirv_cross::Compiler comp{
 		reinterpret_cast<const uint32_t*>(shader_data.data()), padded_size / 4
 	};
@@ -390,34 +364,32 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 
 	// We are only creating 1 new command buffer.
 	assert(new_buf.size() == 1);
-	_impl->submit_cmd_buffer_id = _impl->command_buffers.size();
-	_impl->command_buffers.push_back(std::move(new_buf.back()));
+	_impl->pipeline_submit_cmd = std::move(new_buf.back());
 }
 
 void task::record(
 		size_t width /*= 1u*/, size_t height /*= 1u*/, size_t depth /*= 1u*/) {
+	assert(_impl->pipeline_submit_cmd != vk::CommandBuffer{});
+
 	// This records the "main task" of our compute shader and stores it for
 	// later submitting.
-
 	vk::CommandBufferBeginInfo begin_info{
 		// flags optional
 	};
 
 	// start recording commands.
-	vk::CommandBuffer& command_buffer
-			= _impl->command_buffers[_impl->submit_cmd_buffer_id];
-	command_buffer.begin(begin_info);
+	_impl->pipeline_submit_cmd.begin(begin_info);
 
 	/*
 	We need to bind a pipeline, AND a descriptor set before we dispatch.
 	The validation layer will NOT give warnings if you forget these, so be very
 	careful not to forget them.
 	*/
-	command_buffer.bindPipeline(
+	_impl->pipeline_submit_cmd.bindPipeline(
 			vk::PipelineBindPoint::eCompute, _impl->pipeline.get());
-	command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-			_impl->pipeline_layout.get(), 0, 1, &_impl->descriptor_sets.back(),
-			0, nullptr);
+	_impl->pipeline_submit_cmd.bindDescriptorSets(
+			vk::PipelineBindPoint::eCompute, _impl->pipeline_layout.get(), 0, 1,
+			&_impl->descriptor_sets.back(), 0, nullptr);
 
 	for (std::pair<const std::string, push_constant_info>& kv :
 			_impl->push_constants_name_to_info) {
@@ -426,7 +398,7 @@ void task::record(
 			continue;
 		}
 
-		command_buffer.pushConstants(_impl->pipeline_layout.get(),
+		_impl->pipeline_submit_cmd.pushConstants(_impl->pipeline_layout.get(),
 				vk::ShaderStageFlagBits::eCompute, uint32_t(info.offset),
 				uint32_t(info.byte_size), info.constant);
 
@@ -441,25 +413,26 @@ void task::record(
 	uint32_t x = uint32_t(std::ceil(width / double(_impl->workgroupsizes[0])));
 	uint32_t y = uint32_t(std::ceil(height / double(_impl->workgroupsizes[1])));
 	uint32_t z = uint32_t(std::ceil(depth / double(_impl->workgroupsizes[2])));
-	command_buffer.dispatch(x, y, z);
+	_impl->pipeline_submit_cmd.dispatch(x, y, z);
 
 	// end recording commands.
-	command_buffer.end();
+	_impl->pipeline_submit_cmd.end();
 }
 
 
 void task::submit() {
+	assert(_impl->pipeline_submit_cmd != vk::CommandBuffer{});
+
 	/*
 	Now we shall finally submit the recorded command buffer to a queue.
 	*/
-
 	vk::SubmitInfo submit_info{
 		{},
 		nullptr,
 		nullptr,
 		1, // submit a single command buffer
 		// the command buffer to submit.
-		&_impl->command_buffers[_impl->submit_cmd_buffer_id],
+		&_impl->pipeline_submit_cmd,
 	};
 
 	/*

@@ -39,7 +39,7 @@ struct task : pimpl_ptr<detail::task_impl> {
 
 	// Copies your data into gpu buffer.
 	// If you don't need to use this (you don't copy any data to the gpu), you
-	// must call reserve_buffer!
+	// must call reserve_buffer.
 	template <class T>
 	void push_buffer(const char* buf_name, const std::vector<T>& in_data);
 
@@ -47,6 +47,8 @@ struct task : pimpl_ptr<detail::task_impl> {
 	// (while you can call submit as many times are required).
 	// The provided width, height and depth will be divided by shader work group
 	// sizes, to compute the number of group counts.
+	//
+	// TODO : Remove record and figure out if we need to record ourselves.
 	void record(size_t width = 1u, size_t height = 1u, size_t depth = 1u);
 
 	// Executes the compute shader. Blocking.
