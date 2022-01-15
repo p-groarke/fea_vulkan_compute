@@ -12,6 +12,8 @@ include(GoogleTest)
 option(FEA_VKC_TESTS "Build and run tests." On)
 # option(FEA_VKC_BENCHMARKS "Build and run bencharks, requires tests." Off)
 
+# The library itself is c++17, but we make the unit-tests c++14
+# to guarantee it can link or be consumed appropriately.
 set(CMAKE_CXX_STANDARD 14)
 
 # Output to predictable location.

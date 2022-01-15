@@ -1,4 +1,6 @@
 #pragma once
+#include "private_include/buffers.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -10,21 +12,21 @@
 
 namespace vkc {
 struct buffer_binding {
-	uint32_t set_id = (std::numeric_limits<uint32_t>::max)();
-	uint32_t binding_id = (std::numeric_limits<uint32_t>::max)();
+	set_id_t set_id = (std::numeric_limits<uint32_t>::max)();
+	binding_id_t binding_id = (std::numeric_limits<uint32_t>::max)();
 	std::string name;
 };
 
 struct uniform_binding {
-	uint32_t set_id = (std::numeric_limits<uint32_t>::max)();
-	uint32_t binding_id = (std::numeric_limits<uint32_t>::max)();
+	set_id_t set_id = (std::numeric_limits<uint32_t>::max)();
+	binding_id_t binding_id = (std::numeric_limits<uint32_t>::max)();
 	std::string name;
 	size_t offset = 0;
 	size_t size = 0;
 };
 
 
-std::vector<buffer_binding> get_buffer_bindings(
+std::vector<buffer_binding> reflect_buffer_bindings(
 		const spirv_cross::Compiler& comp) {
 	spirv_cross::ShaderResources resources = comp.get_shader_resources();
 	std::vector<buffer_binding> ret;
@@ -41,7 +43,7 @@ std::vector<buffer_binding> get_buffer_bindings(
 	return ret;
 }
 
-std::vector<uniform_binding> get_uniform_bindings(
+std::vector<uniform_binding> reflect_uniform_bindings(
 		const spirv_cross::Compiler& comp) {
 	spirv_cross::ShaderResources resources = comp.get_shader_resources();
 	std::vector<uniform_binding> ret;
@@ -82,7 +84,7 @@ std::vector<uniform_binding> get_uniform_bindings(
 	return ret;
 }
 
-std::array<uint32_t, 3> get_workinggroup_sizes(
+std::array<uint32_t, 3> reflect_workinggroup_sizes(
 		const spirv_cross::Compiler& comp) {
 	std::array<uint32_t, 3> ret{ 1u, 1u, 1u };
 

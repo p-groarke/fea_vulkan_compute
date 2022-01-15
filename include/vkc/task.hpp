@@ -18,10 +18,12 @@ struct task : pimpl_ptr<detail::task_impl> {
 	task(vkc& vkc_inst, const wchar_t* shader_path);
 	~task();
 
-	task(const task&) = delete;
 	task(task&&);
-	task& operator=(const task&) = delete;
 	task& operator=(task&&);
+
+	// Move-only.
+	task(const task&) = delete;
+	task& operator=(const task&) = delete;
 
 	// Enqueue your push_constant block.
 	// constant_name is the name of the block in the shader.
@@ -33,14 +35,13 @@ struct task : pimpl_ptr<detail::task_impl> {
 	// Call this if you never have to push data to the shader.
 	// AKA, if your compute shader is purely a data generator.
 	template <class T>
-	void reserve_buffer(vkc& vkc_inst, const char* buf_name, size_t size);
+	void reserve_buffer(const char* buf_name, size_t size);
 
 	// Copies your data into gpu buffer.
 	// If you don't need to use this (you don't copy any data to the gpu), you
 	// must call reserve_buffer!
 	template <class T>
-	void push_buffer(
-			vkc& vkc_inst, const char* buf_name, const std::vector<T>& in_data);
+	void push_buffer(const char* buf_name, const std::vector<T>& in_data);
 
 	// This records the submit work to be done. You should call this only once
 	// (while you can call submit as many times are required).
@@ -49,21 +50,21 @@ struct task : pimpl_ptr<detail::task_impl> {
 	void record(size_t width = 1u, size_t height = 1u, size_t depth = 1u);
 
 	// Executes the compute shader. Blocking.
-	void submit(vkc& vkc_inst);
+	void submit();
 
 	// Copies your gpu buffer into data.
 	template <class T>
-	void pull_buffer(vkc& vkc_inst, const char* buf_name, std::vector<T>* data);
+	void pull_buffer(const char* buf_name, std::vector<T>* data);
 
 private:
 	void push_constant(
 			const char* constant_name, const void* val, size_t byte_size);
-	void reserve_buffer(vkc& vkc_inst, const char* buf_name, size_t byte_size);
-	void push_buffer(vkc& vkc_inst, const char* buf_name,
-			const uint8_t* in_data, size_t byte_size);
+	void reserve_buffer(const char* buf_name, size_t byte_size);
+	void push_buffer(
+			const char* buf_name, const uint8_t* in_data, size_t byte_size);
 
 	size_t get_buffer_byte_size(const char* buf_name) const;
-	void pull_buffer(vkc& vkc_inst, const char* buf_name, uint8_t* out_data);
+	void pull_buffer(const char* buf_name, uint8_t* out_data);
 };
 
 
@@ -75,23 +76,19 @@ void task::push_constant(const char* constant_name, const T& val) {
 }
 
 template <class T>
-void task::reserve_buffer(vkc& vkc_inst, const char* buf_name, size_t size) {
-	reserve_buffer(vkc_inst, buf_name, sizeof(T) * size);
+void task::reserve_buffer(const char* buf_name, size_t size) {
+	reserve_buffer(buf_name, sizeof(T) * size);
 }
 
 template <class T>
-void task::push_buffer(
-		vkc& vkc_inst, const char* buf_name, const std::vector<T>& in_data) {
-	push_buffer(vkc_inst, buf_name,
-			reinterpret_cast<const uint8_t*>(in_data.data()),
+void task::push_buffer(const char* buf_name, const std::vector<T>& in_data) {
+	push_buffer(buf_name, reinterpret_cast<const uint8_t*>(in_data.data()),
 			sizeof(T) * in_data.size());
 }
 
 template <class T>
-void task::pull_buffer(
-		vkc& vkc_inst, const char* buf_name, std::vector<T>* out_data) {
+void task::pull_buffer(const char* buf_name, std::vector<T>* out_data) {
 	out_data->resize(get_buffer_byte_size(buf_name) / sizeof(T));
-	pull_buffer(
-			vkc_inst, buf_name, reinterpret_cast<uint8_t*>(out_data->data()));
+	pull_buffer(buf_name, reinterpret_cast<uint8_t*>(out_data->data()));
 }
 } // namespace vkc

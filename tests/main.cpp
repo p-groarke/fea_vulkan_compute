@@ -51,11 +51,11 @@ TEST(vulkan_compute, basics) {
 		vkc::task t{ gpu, shader_path.c_str() };
 
 		t.push_constant("p_constants", size);
-		t.reserve_buffer<pixel>(gpu, "buf", image_data.size());
+		t.reserve_buffer<pixel>("buf", image_data.size());
 		t.record(size.width, size.height);
-		t.submit(gpu);
+		t.submit();
 
-		t.pull_buffer(gpu, "buf", &image_data);
+		t.pull_buffer("buf", &image_data);
 	});
 
 	suite.print();

@@ -20,11 +20,12 @@ struct vkc : pimpl_ptr<detail::vkc_impl> {
 	vkc();
 	~vkc();
 
-	vkc(const vkc&) = delete;
 	vkc(vkc&&);
-	vkc& operator=(const vkc&) = delete;
 	vkc& operator=(vkc&&);
 
+	// Move-only.
+	vkc(const vkc&) = delete;
+	vkc& operator=(const vkc&) = delete;
 
 	// These are used internally.
 
