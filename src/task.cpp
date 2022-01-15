@@ -1,20 +1,23 @@
 ﻿#include "vkc/task.hpp"
+#include "private_include/reflection.hpp"
 #include "vkc/vkc.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <fea/maps/unsigned_map.hpp>
-#include <fea/utils/file.hpp>
 #include <filesystem>
-#include <spirv_cross.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <fea/maps/unsigned_map.hpp>
+#include <fea/utils/file.hpp>
+#include <spirv_cross.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace vkc {
+// Helper structs.
 namespace {
 // A memory buffer.
 struct buffer_info {
@@ -35,6 +38,7 @@ struct buffer_info {
 	size_t pull_cmd_buffer_id = std::numeric_limits<size_t>::max();
 };
 
+// A push constant (uniform).
 struct push_constant_info {
 	uint32_t set = std::numeric_limits<uint32_t>::max();
 	uint32_t binding = std::numeric_limits<uint32_t>::max();
@@ -44,62 +48,6 @@ struct push_constant_info {
 };
 
 
-// Pass in the gpu instance, the buffer for which this memory will be used and
-// your desired memory types flag.
-vk::MemoryAllocateInfo find_memory_type(const vkc& vkc_inst,
-		const vk::Buffer& buffer, vk::MemoryPropertyFlags desired_mem_flags) {
-
-	/*
-	 First, we find the memory requirements for the buffer.
-	*/
-	vk::MemoryRequirements requirements
-			= vkc_inst.device().getBufferMemoryRequirements(buffer);
-
-
-	vk::PhysicalDeviceMemoryProperties memory_properties
-			= vkc_inst.physical_device().getMemoryProperties();
-
-	/*
-	How does this search work?
-	See the documentation of VkPhysicalDeviceMemoryProperties for a detailed
-	description.
-	*/
-	for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
-		if ((requirements.memoryTypeBits & (1 << i))
-				&& ((memory_properties.memoryTypes[i].propertyFlags
-							& desired_mem_flags)
-						== desired_mem_flags)) {
-
-			return vk::MemoryAllocateInfo{ requirements.size, i };
-		}
-	}
-
-	throw std::runtime_error{
-		"vkc::task : Couldn't find required memory type."
-	};
-}
-
-void create_buffer(vkc& vkc_inst, size_t byte_size, vk::BufferUsageFlags usage,
-		vk::MemoryPropertyFlags mem_flags, vk::UniqueBuffer& buffer,
-		vk::UniqueDeviceMemory& buffer_memory) {
-
-	vk::BufferCreateInfo buffer_create_info{
-		{}, byte_size, usage,
-		vk::SharingMode::eExclusive, // exclusive to a single queue family
-	};
-
-	buffer = vkc_inst.device().createBufferUnique(buffer_create_info);
-
-	vk::MemoryAllocateInfo allocate_info
-			= find_memory_type(vkc_inst, buffer.get(), mem_flags);
-
-	// allocate memory on device.
-	buffer_memory = vkc_inst.device().allocateMemoryUnique(allocate_info);
-
-	// Now associate that allocated memory with the buffer. With that, the
-	// buffer is backed by actual memory.
-	vkc_inst.device().bindBufferMemory(buffer.get(), buffer_memory.get(), 0);
-}
 } // namespace
 
 namespace detail {
@@ -146,8 +94,324 @@ struct task_impl {
 };
 } // namespace detail
 
-task::task(vkc& vkc_inst, const wchar_t* shader_path) {
 
+// Helper functions.
+namespace {
+// Pass in the gpu instance, the buffer for which this memory will be used and
+// your desired memory types flag.
+vk::MemoryAllocateInfo find_memory_type(const vkc& vkc_inst,
+		const vk::Buffer& buffer, vk::MemoryPropertyFlags desired_mem_flags) {
+
+	/*
+	 First, we find the memory requirements for the buffer.
+	*/
+	vk::MemoryRequirements requirements
+			= vkc_inst.device().getBufferMemoryRequirements(buffer);
+
+
+	vk::PhysicalDeviceMemoryProperties memory_properties
+			= vkc_inst.physical_device().getMemoryProperties();
+
+	/*
+	How does this search work?
+	See the documentation of VkPhysicalDeviceMemoryProperties for a detailed
+	description.
+	*/
+	for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
+		if ((requirements.memoryTypeBits & (1 << i))
+				&& ((memory_properties.memoryTypes[i].propertyFlags
+							& desired_mem_flags)
+						== desired_mem_flags)) {
+
+			return vk::MemoryAllocateInfo{ requirements.size, i };
+		}
+	}
+
+	throw std::runtime_error{
+		"vkc::task : Couldn't find required memory type."
+	};
+}
+
+void init_buffers(vkc& vkc_inst, detail::task_impl& impl,
+		const spirv_cross::Compiler& comp) {
+
+	std::vector<buffer_binding> buffer_bindings = get_buffer_bindings(comp);
+
+	// Gathered info to call create once.
+	fea::unsigned_map<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>
+			layout_bindings;
+
+	for (const buffer_binding& b : buffer_bindings) {
+		impl.buffer_name_to_info[b.name] = { b.set_id, b.binding_id };
+
+		/*
+		 Here we specify a binding of type VK_DESCRIPTOR_TYPE_STORAGE_BUFFER to
+		 the binding point. This binds to layout(std140, binding = 0) buffer
+		 buf in the compute shader.
+		*/
+		vk::DescriptorSetLayoutBinding descriptor_set_layout_binding{
+			b.binding_id,
+			vk::DescriptorType::eStorageBuffer,
+			1,
+			vk::ShaderStageFlagBits::eCompute,
+		};
+		layout_bindings[b.set_id].push_back(descriptor_set_layout_binding);
+	}
+
+	/*
+	 Here we specify a descriptor set layout. This allows us to bind our
+	 descriptors to resources in the shader.
+	*/
+	std::vector<vk::DescriptorPoolSize> pool_sizes;
+	for (const std::pair<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>&
+					kv : layout_bindings) {
+
+		const auto& bindings = kv.second;
+		vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
+			{},
+			uint32_t(bindings.size()),
+			bindings.data(),
+		};
+
+		// Create the descriptor set layout.
+		impl.descriptor_set_layouts.push_back(
+				vkc_inst.device().createDescriptorSetLayoutUnique(
+						descriptor_set_layout_create_info));
+
+
+		/*
+		 So we will allocate a descriptor set here.
+		 But we need to first create a descriptor pool to do that.
+		*/
+		vk::DescriptorPoolSize descriptor_pool_size{
+			vk::DescriptorType::eStorageBuffer,
+			uint32_t(bindings.size()),
+		};
+		pool_sizes.push_back(descriptor_pool_size);
+	}
+
+
+	vk::DescriptorPoolCreateInfo descriptor_pool_create_info{
+		{},
+		uint32_t(layout_bindings.size()),
+		uint32_t(pool_sizes.size()),
+		pool_sizes.data(),
+	};
+
+	// create descriptor pool.
+	impl.descriptor_pool = vkc_inst.device().createDescriptorPoolUnique(
+			descriptor_pool_create_info);
+
+	/*
+	 With the pool allocated, we can now allocate the descriptor set.
+	*/
+	std::vector<vk::DescriptorSetLayout> layouts;
+	for (const auto& l : impl.descriptor_set_layouts) {
+		layouts.push_back(l.get());
+	}
+
+	vk::DescriptorSetAllocateInfo descriptor_set_allocate_info{
+		impl.descriptor_pool.get(), // pool to allocate from.
+		uint32_t(layouts.size()),
+		layouts.data(),
+	};
+
+	// allocate descriptor set.
+	impl.descriptor_sets = vkc_inst.device().allocateDescriptorSets(
+			descriptor_set_allocate_info);
+}
+
+void init_uniforms(detail::task_impl& impl, const spirv_cross::Compiler& comp) {
+	std::vector<uniform_binding> uniform_bindings = get_uniform_bindings(comp);
+
+	// fea::unsigned_map<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>
+	//		layout_bindings;
+
+	for (const uniform_binding& b : uniform_bindings) {
+		impl.push_constants_name_to_info[b.name] = {
+			b.set_id,
+			b.binding_id,
+			b.offset,
+			b.size,
+			nullptr,
+		};
+
+		vk::PushConstantRange push_constant_range{
+			vk::ShaderStageFlagBits::eCompute,
+			uint32_t(b.offset),
+			uint32_t(b.size),
+		};
+		impl.push_constants_ranges.push_back(push_constant_range);
+	}
+}
+
+void create_buffer(vkc& vkc_inst, size_t byte_size, vk::BufferUsageFlags usage,
+		vk::MemoryPropertyFlags mem_flags, vk::UniqueBuffer& buffer,
+		vk::UniqueDeviceMemory& buffer_memory) {
+
+	vk::BufferCreateInfo buffer_create_info{
+		{}, byte_size, usage,
+		vk::SharingMode::eExclusive, // exclusive to a single queue family
+	};
+
+	buffer = vkc_inst.device().createBufferUnique(buffer_create_info);
+
+	vk::MemoryAllocateInfo allocate_info
+			= find_memory_type(vkc_inst, buffer.get(), mem_flags);
+
+	// allocate memory on device.
+	buffer_memory = vkc_inst.device().allocateMemoryUnique(allocate_info);
+
+	// Now associate that allocated memory with the buffer. With that, the
+	// buffer is backed by actual memory.
+	vkc_inst.device().bindBufferMemory(buffer.get(), buffer_memory.get(), 0);
+}
+
+void allocate_buffer(vkc& vkc_inst, detail::task_impl& impl,
+		buffer_info& buf_info, size_t buf_size) {
+	// We create 2 buffers, one staging cpu visible, one gpu only.
+	// Later, we will copy data from staging to gpu.
+	if (buf_info.byte_size == buf_size) {
+		return;
+	}
+
+	// Create staging buffer.
+	vk::BufferUsageFlags staging_usage = vk::BufferUsageFlagBits::eTransferSrc
+			| vk::BufferUsageFlagBits::eTransferDst;
+
+	vk::MemoryPropertyFlags staging_mem_flags
+			= vk::MemoryPropertyFlagBits::eHostVisible
+			| vk::MemoryPropertyFlagBits::eHostCoherent;
+
+	create_buffer(vkc_inst, buf_size, staging_usage, staging_mem_flags,
+			buf_info.staging_buffer, buf_info.staging_buffer_memory);
+
+	// Create gpu buffer.
+	vk::BufferUsageFlags gpu_usage = vk::BufferUsageFlagBits::eTransferDst
+			| vk::BufferUsageFlagBits::eTransferSrc
+			| vk::BufferUsageFlagBits::eStorageBuffer;
+
+	vk::MemoryPropertyFlags gpu_mem_flags
+			= vk::MemoryPropertyFlagBits::eDeviceLocal;
+
+	create_buffer(vkc_inst, buf_size, gpu_usage, gpu_mem_flags,
+			buf_info.gpu_buffer, buf_info.gpu_buffer_memory);
+
+	buf_info.byte_size = buf_size;
+
+	// Specify the buffer to bind to the descriptor.
+	vk::DescriptorBufferInfo descriptor_buffer_info{
+		buf_info.gpu_buffer.get(),
+		0,
+		buf_info.byte_size,
+	};
+
+	vk::WriteDescriptorSet write_descriptor_set{
+		impl.descriptor_sets[buf_info.set], // write to this descriptor set.
+		buf_info.binding, // write to the binding.
+		{}, //??
+		1, // update a single descriptor.
+		vk::DescriptorType::eStorageBuffer,
+		nullptr,
+		&descriptor_buffer_info,
+	};
+
+	// perform the update of the descriptor set.
+	vkc_inst.device().updateDescriptorSets(
+			1, &write_descriptor_set, 0, nullptr);
+}
+
+void push_buffer_impl(vkc& vkc_inst, detail::task_impl& impl,
+		buffer_info& buf_info, const uint8_t* in_memory) {
+	// Map the buffer memory, so that we can read from it on the CPU.
+	void* mapped_memory = vkc_inst.device().mapMemory(
+			buf_info.staging_buffer_memory.get(), 0, buf_info.byte_size);
+	uint8_t* out_mem = reinterpret_cast<uint8_t*>(mapped_memory);
+	std::copy(in_memory, in_memory + buf_info.byte_size, out_mem);
+
+	// Done writing, so unmap.
+	vkc_inst.device().unmapMemory(buf_info.staging_buffer_memory.get());
+
+	// Now, copy the staging buffer to gpu memory.
+	vk::SubmitInfo submit_info{
+		{},
+		nullptr,
+		nullptr,
+		1, // submit a single command buffer
+		// the command buffer to submit.
+		&impl.command_buffers[buf_info.push_cmd_buffer_id],
+	};
+
+	vkc_inst.queue().submit(1, &submit_info, {});
+	vkc_inst.queue().waitIdle();
+}
+
+void pull_buffer_impl(const vkc& vkc_inst, const detail::task_impl& impl,
+		const buffer_info& buf_info, uint8_t* out_memory) {
+	// First, copy the gpu buffer to staging buffer.
+	vk::SubmitInfo submit_info{
+		{},
+		nullptr,
+		nullptr,
+		1,
+		&impl.command_buffers[buf_info.pull_cmd_buffer_id],
+	};
+
+	vkc_inst.queue().submit(1, &submit_info, {});
+	vkc_inst.queue().waitIdle();
+
+	// Map the buffer memory, so that we can read from it on the CPU.
+	const void* mapped_memory = vkc_inst.device().mapMemory(
+			buf_info.staging_buffer_memory.get(), 0, buf_info.byte_size);
+	const uint8_t* source_mem = reinterpret_cast<const uint8_t*>(mapped_memory);
+	std::copy(source_mem, source_mem + buf_info.byte_size, out_memory);
+
+	// Done reading, so unmap.
+	vkc_inst.device().unmapMemory(buf_info.staging_buffer_memory.get());
+}
+
+size_t record_buffer_transfer(vkc& vkc_inst, detail::task_impl& impl,
+		size_t byte_size, vk::Buffer src, vk::Buffer dst) {
+	vk::CommandBufferAllocateInfo alloc_info{
+		impl.command_pool.get(),
+		vk::CommandBufferLevel::ePrimary,
+		1,
+	};
+
+	std::vector<vk::CommandBuffer> new_buf
+			= vkc_inst.device().allocateCommandBuffers(alloc_info);
+
+	// We are only creating 1 new command buffer.
+	assert(new_buf.size() == 1);
+
+	size_t ret_id = impl.command_buffers.size();
+
+	impl.command_buffers.push_back(std::move(new_buf.back()));
+
+	vk::CommandBuffer& command_buffer = impl.command_buffers[ret_id];
+
+	vk::CommandBufferBeginInfo begin_info{};
+	command_buffer.begin(begin_info);
+
+	vk::BufferCopy copy_region{
+		0,
+		0,
+		byte_size,
+	};
+	command_buffer.copyBuffer(src, dst, 1, &copy_region);
+	command_buffer.end();
+
+	return ret_id;
+}
+} // namespace
+
+task::~task() = default;
+// task::task(const task&) = default;
+task::task(task&&) = default;
+// task& task::operator=(const task&) = default;
+task& task::operator=(task&&) = default;
+
+task::task(vkc& vkc_inst, const wchar_t* shader_path) {
 	// load shader
 	// the code in comp.spv was created by running the command:
 	// glslangValidator.exe -V shader.comp
@@ -185,17 +449,16 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path) {
 		reinterpret_cast<const uint32_t*>(shader_data.data()), padded_size / 4
 	};
 
-	init_storage_resources(vkc_inst, comp);
-	init_uniforms(comp);
+	init_buffers(vkc_inst, *_impl, comp);
+	init_uniforms(*_impl, comp);
 
 	spirv_cross::SpecializationConstant x_unused, y_unused, z_unused;
 	uint32_t id = comp.get_work_group_size_specialization_constants(
 			x_unused, y_unused, z_unused);
 
 	if (id == 0) {
-		throw std::runtime_error{
-			"task : Compute shader must declare work group sizes."
-		};
+		throw std::runtime_error{ std::string{ __FUNCTION__ }
+			+ " : Compute shader must declare work group sizes." };
 	}
 
 	const spirv_cross::SPIRConstant& workgroup_vals = comp.get_constant(id);
@@ -353,8 +616,7 @@ void task::record(
 	/*
 	 Calling vkCmdDispatch basically starts the compute pipeline, and executes
 	 the compute shader. The number of workgroups is specified in the
-	 arguments. If you are already familiar with compute shaders from OpenGL,
-	 this should be nothing new to you.
+	 arguments.
 	*/
 	uint32_t x = uint32_t(std::ceil(width / double(_impl->workgroupsizes[0])));
 	uint32_t y = uint32_t(std::ceil(height / double(_impl->workgroupsizes[1])));
@@ -389,298 +651,58 @@ void task::submit(vkc& vkc_inst) {
 	vkc_inst.queue().waitIdle();
 }
 
-void task::init_storage_resources(
-		vkc& vkc_inst, const spirv_cross::Compiler& comp) {
-	spirv_cross::ShaderResources resources = comp.get_shader_resources();
+void task::push_constant(
+		const char* constant_name, const void* val, size_t size) {
+	push_constant_info& info
+			= _impl->push_constants_name_to_info.at(constant_name);
 
-	// Gathered info to call create once.
-	fea::unsigned_map<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>
-			layout_bindings;
-	std::vector<vk::DescriptorPoolSize> pool_sizes;
-
-	for (const spirv_cross::Resource& res : resources.storage_buffers) {
-		uint32_t set
-				= comp.get_decoration(res.id, spv::DecorationDescriptorSet);
-		uint32_t binding = comp.get_decoration(res.id, spv::DecorationBinding);
-
-		_impl->buffer_name_to_info[res.name] = { set, binding };
-
-		/*
-		 Here we specify a binding of type VK_DESCRIPTOR_TYPE_STORAGE_BUFFER to
-		 the binding point. This binds to layout(std140, binding = 0) buffer
-		 buf in the compute shader.
-		*/
-		vk::DescriptorSetLayoutBinding descriptor_set_layout_binding{
-			binding,
-			vk::DescriptorType::eStorageBuffer,
-			1,
-			vk::ShaderStageFlagBits::eCompute,
+	if (size != info.byte_size) {
+		throw std::invalid_argument{
+			__FUNCTION__ " : Mismatch between passed in push_constant size and "
+						 "shader size."
 		};
-		layout_bindings[set].push_back(descriptor_set_layout_binding);
 	}
 
-	/*
-	 Here we specify a descriptor set layout. This allows us to bind our
-	 descriptors to resources in the shader.
-	*/
-	for (const std::pair<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>&
-					kv : layout_bindings) {
+	info.constant = val;
+}
 
-		const auto& bindings = kv.second;
-		vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
-			{},
-			uint32_t(bindings.size()),
-			bindings.data(),
-		};
+void task::reserve_buffer(
+		vkc& vkc_inst, const char* buf_name, size_t byte_size) {
+	buffer_info& info = _impl->buffer_name_to_info.at(buf_name);
+	allocate_buffer(vkc_inst, *_impl, info, byte_size);
+}
 
-		// Create the descriptor set layout.
-		_impl->descriptor_set_layouts.push_back(
-				vkc_inst.device().createDescriptorSetLayoutUnique(
-						descriptor_set_layout_create_info));
+void task::push_buffer(vkc& vkc_inst, const char* buf_name,
+		const uint8_t* in_data, size_t byte_size) {
+	buffer_info& info = _impl->buffer_name_to_info.at(buf_name);
 
+	// won't allocate if preallocated
+	allocate_buffer(vkc_inst, *_impl, info, byte_size);
 
-		/*
-		 So we will allocate a descriptor set here.
-		 But we need to first create a descriptor pool to do that.
-		*/
-		vk::DescriptorPoolSize descriptor_pool_size{
-			vk::DescriptorType::eStorageBuffer,
-			uint32_t(bindings.size()),
-		};
-		pool_sizes.push_back(descriptor_pool_size);
+	if (info.push_cmd_buffer_id == std::numeric_limits<size_t>::max()) {
+		info.push_cmd_buffer_id = record_buffer_transfer(vkc_inst, *_impl,
+				byte_size, info.staging_buffer.get(), info.gpu_buffer.get());
 	}
 
+	push_buffer_impl(vkc_inst, *_impl, info, in_data);
+}
 
-	vk::DescriptorPoolCreateInfo descriptor_pool_create_info{
-		{},
-		uint32_t(layout_bindings.size()),
-		uint32_t(pool_sizes.size()),
-		pool_sizes.data(),
-	};
 
-	// create descriptor pool.
-	_impl->descriptor_pool = vkc_inst.device().createDescriptorPoolUnique(
-			descriptor_pool_create_info);
+size_t task::get_buffer_byte_size(const char* buf_name) const {
+	const buffer_info& info = _impl->buffer_name_to_info.at(buf_name);
+	return info.byte_size;
+}
 
-	/*
-	 With the pool allocated, we can now allocate the descriptor set.
-	*/
-	std::vector<vk::DescriptorSetLayout> layouts;
-	for (const auto& l : _impl->descriptor_set_layouts) {
-		layouts.push_back(l.get());
+void task::pull_buffer(vkc& vkc_inst, const char* buf_name, uint8_t* out_data) {
+	buffer_info& info = _impl->buffer_name_to_info.at(buf_name);
+
+	if (info.pull_cmd_buffer_id == std::numeric_limits<size_t>::max()) {
+		info.pull_cmd_buffer_id
+				= record_buffer_transfer(vkc_inst, *_impl, info.byte_size,
+						info.gpu_buffer.get(), info.staging_buffer.get());
 	}
 
-	vk::DescriptorSetAllocateInfo descriptor_set_allocate_info{
-		_impl->descriptor_pool.get(), // pool to allocate from.
-		uint32_t(layouts.size()),
-		layouts.data(),
-	};
-
-	// allocate descriptor set.
-	_impl->descriptor_sets = vkc_inst.device().allocateDescriptorSets(
-			descriptor_set_allocate_info);
+	pull_buffer_impl(vkc_inst, *_impl, info, out_data);
 }
-
-void task::init_uniforms(const spirv_cross::Compiler& comp) {
-	spirv_cross::ShaderResources resources = comp.get_shader_resources();
-
-	fea::unsigned_map<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>
-			layout_bindings;
-
-	for (const spirv_cross::Resource& res : resources.push_constant_buffers) {
-		uint32_t set
-				= comp.get_decoration(res.id, spv::DecorationDescriptorSet);
-		uint32_t binding = comp.get_decoration(res.id, spv::DecorationBinding);
-
-		// comp.get_si
-		spirv_cross::SmallVector<spirv_cross::BufferRange> ranges
-				= comp.get_active_buffer_ranges(res.id);
-
-		if (ranges.empty()) {
-			continue;
-		}
-
-		size_t offset = ranges.front().offset;
-		size_t size = 0;
-
-		for (const spirv_cross::BufferRange& range : ranges) {
-			size += range.range;
-			// range.index; // Struct member index
-			// range.offset; // Offset into struct
-			// range.range; // Size of struct member
-		}
-
-		if (size > 128) {
-			throw std::runtime_error{
-				__FUNCTION__ " : Vulkan limits the size of push_constants to "
-							 "128 Bytes. Push_constant struct too big."
-			};
-		}
-
-		_impl->push_constants_name_to_info[res.name]
-				= { set, binding, offset, size, nullptr };
-
-		vk::PushConstantRange push_constant_range{
-			vk::ShaderStageFlagBits::eCompute,
-			uint32_t(offset),
-			uint32_t(size),
-		};
-		_impl->push_constants_ranges.push_back(push_constant_range);
-	}
-}
-
-void task::allocate_buffer(
-		vkc& vkc_inst, buffer_info& buf_info, size_t buf_size) {
-	// We create 2 buffers, one staging cpu visible, one gpu only.
-	// Later, we will copy data from staging to gpu.
-	if (buf_info.byte_size == buf_size) {
-		return;
-	}
-
-	// Create staging buffer.
-	vk::BufferUsageFlags staging_usage = vk::BufferUsageFlagBits::eTransferSrc
-			| vk::BufferUsageFlagBits::eTransferDst;
-
-	vk::MemoryPropertyFlags staging_mem_flags
-			= vk::MemoryPropertyFlagBits::eHostVisible
-			| vk::MemoryPropertyFlagBits::eHostCoherent;
-
-	create_buffer(vkc_inst, buf_size, staging_usage, staging_mem_flags,
-			buf_info.staging_buffer, buf_info.staging_buffer_memory);
-
-	// Create gpu buffer.
-	vk::BufferUsageFlags gpu_usage = vk::BufferUsageFlagBits::eTransferDst
-			| vk::BufferUsageFlagBits::eTransferSrc
-			| vk::BufferUsageFlagBits::eStorageBuffer;
-
-	vk::MemoryPropertyFlags gpu_mem_flags
-			= vk::MemoryPropertyFlagBits::eDeviceLocal;
-
-	create_buffer(vkc_inst, buf_size, gpu_usage, gpu_mem_flags,
-			buf_info.gpu_buffer, buf_info.gpu_buffer_memory);
-
-	buf_info.byte_size = buf_size;
-
-	// Specify the buffer to bind to the descriptor.
-	vk::DescriptorBufferInfo descriptor_buffer_info{
-		buf_info.gpu_buffer.get(),
-		0,
-		buf_info.byte_size,
-	};
-
-	vk::WriteDescriptorSet write_descriptor_set{
-		_impl->descriptor_sets[buf_info.set], // write to this descriptor set.
-		buf_info.binding, // write to the binding.
-		{}, //??
-		1, // update a single descriptor.
-		vk::DescriptorType::eStorageBuffer,
-		nullptr,
-		&descriptor_buffer_info,
-	};
-
-	// perform the update of the descriptor set.
-	vkc_inst.device().updateDescriptorSets(
-			1, &write_descriptor_set, 0, nullptr);
-}
-
-
-void task::push_buffer(
-		vkc& vkc_inst, buffer_info& buf_info, const char* in_memory) {
-	// Map the buffer memory, so that we can read from it on the CPU.
-	void* mapped_memory = vkc_inst.device().mapMemory(
-			buf_info.staging_buffer_memory.get(), 0, buf_info.byte_size);
-	char* out_mem = reinterpret_cast<char*>(mapped_memory);
-	std::copy(in_memory, in_memory + buf_info.byte_size, out_mem);
-
-	// Done writing, so unmap.
-	vkc_inst.device().unmapMemory(buf_info.staging_buffer_memory.get());
-
-	// Now, copy the staging buffer to gpu memory.
-	vk::SubmitInfo submit_info{
-		{},
-		nullptr,
-		nullptr,
-		1, // submit a single command buffer
-		// the command buffer to submit.
-		&_impl->command_buffers[buf_info.push_cmd_buffer_id],
-	};
-
-	vkc_inst.queue().submit(1, &submit_info, {});
-	vkc_inst.queue().waitIdle();
-}
-
-
-void task::pull_buffer(const vkc& vkc_inst, const buffer_info& buf_info,
-		char* out_memory) const {
-	// First, copy the gpu buffer to staging buffer.
-	vk::SubmitInfo submit_info{
-		{},
-		nullptr,
-		nullptr,
-		1,
-		&_impl->command_buffers[buf_info.pull_cmd_buffer_id],
-	};
-
-	vkc_inst.queue().submit(1, &submit_info, {});
-	vkc_inst.queue().waitIdle();
-
-	// Map the buffer memory, so that we can read from it on the CPU.
-	const void* mapped_memory = vkc_inst.device().mapMemory(
-			buf_info.staging_buffer_memory.get(), 0, buf_info.byte_size);
-	const char* source_mem = reinterpret_cast<const char*>(mapped_memory);
-	std::copy(source_mem, source_mem + buf_info.byte_size, out_memory);
-
-	// Done reading, so unmap.
-	vkc_inst.device().unmapMemory(buf_info.staging_buffer_memory.get());
-}
-
-size_t task::record_buffer_transfer(vkc& vkc_inst, size_t byte_size,
-		const vk::Buffer& src, const vk::Buffer& dst) {
-	vk::CommandBufferAllocateInfo alloc_info{
-		_impl->command_pool.get(),
-		vk::CommandBufferLevel::ePrimary,
-		1,
-	};
-
-	std::vector<vk::CommandBuffer> new_buf
-			= vkc_inst.device().allocateCommandBuffers(alloc_info);
-
-	// We are only creating 1 new command buffer.
-	assert(new_buf.size() == 1);
-
-	size_t ret_id = _impl->command_buffers.size();
-
-	_impl->command_buffers.push_back(std::move(new_buf.back()));
-
-	vk::CommandBuffer& command_buffer = _impl->command_buffers[ret_id];
-
-	vk::CommandBufferBeginInfo begin_info{};
-	command_buffer.begin(begin_info);
-
-	vk::BufferCopy copy_region{
-		0,
-		0,
-		byte_size,
-	};
-	command_buffer.copyBuffer(src, dst, 1, &copy_region);
-	command_buffer.end();
-
-	return ret_id;
-}
-
-
-// const vk::CommandPool& task::command_pool() const {
-//	return _command_pool.get();
-//}
-// vk::CommandPool& task::command_pool() {
-//	return _command_pool.get();
-//}
-//
-// const std::vector<vk::CommandBuffer>& task::command_buffers() const {
-//	return _command_buffers;
-//}
-// std::vector<vk::CommandBuffer>& task::command_buffers() {
-//	return _command_buffers;
-//}
 
 } // namespace vkc

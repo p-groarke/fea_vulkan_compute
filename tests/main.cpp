@@ -1,7 +1,9 @@
-﻿#include <bench_util/bench_util.h>
+﻿#include <fea/benchmark/benchmark.hpp>
 #include <gtest/gtest.h>
 #include <stb_image.h>
-#include <vulkan_compute/vulkan_compute.hpp>
+#include <vkc/vulkan_compute.hpp>
+
+#include <array>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -31,14 +33,14 @@ TEST(vulkan_compute, basics) {
 	std::vector<pixel> image_data;
 	image_data.resize(pixel_size);
 
-	vkc::vkc gpu{ argv0 };
+	vkc::vkc gpu;
 
-	bench::suite suite;
+	fea::bench::suite suite;
 	suite.title("Simulate GPU Modifier");
 	suite.benchmark("Mandelbrot generator (no push, just pull)", [&]() {
-		vkc::task t{ gpu, "data/shaders/mandelbrot.comp.spv" };
+		vkc::task t{ gpu, L"data/shaders/mandelbrot.comp.spv" };
 
-		t.update_push_constant("p_constants", size);
+		t.push_constant("p_constants", size);
 		t.reserve_buffer<pixel>(gpu, "buf", pixel_size);
 		t.record(size.width, size.height);
 		t.submit(gpu);
@@ -47,7 +49,6 @@ TEST(vulkan_compute, basics) {
 	});
 
 	suite.print();
-	suite.clear();
 
 
 	// Get the color data from the buffer, and cast it to bytes.

@@ -71,12 +71,14 @@ if (${FEA_VKC_TESTS})
 
 	# Tests external dependencies.
 	find_package(GTest CONFIG REQUIRED)
+	find_package(stb CONFIG REQUIRED)
 
 	# Test Project
 	set(TEST_NAME ${PROJECT_NAME}_tests)
 	file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp" "tests/*.hpp")
 	add_executable(${TEST_NAME} ${TEST_SOURCES} ${TEST_HEADERS})
 	set_compile_options(${TEST_NAME} PRIVATE)
+	target_link_libraries(${TEST_NAME} GTest::gtest stb::stb fea_vkc fea_libs)
 
 	source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/tests PREFIX "Source Files" FILES ${TEST_SOURCES})
 

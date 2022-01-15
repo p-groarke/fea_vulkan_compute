@@ -20,8 +20,13 @@ struct vkc : pimpl_ptr<detail::vkc_impl> {
 	vkc();
 	~vkc();
 
-	// void compute();
-	// void save_image();
+	vkc(const vkc&) = delete;
+	vkc(vkc&&);
+	vkc& operator=(const vkc&) = delete;
+	vkc& operator=(vkc&&);
+
+
+	// These are used internally.
 
 	const vk::Instance& instance() const;
 	vk::Instance& instance();

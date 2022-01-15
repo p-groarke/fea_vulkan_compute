@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <vector>
+
 #include <vulkan/vulkan.hpp>
 
 namespace vkc {
@@ -69,6 +70,11 @@ struct vkc_impl {
 	uint32_t queue_family_idx;
 };
 } // namespace detail
+
+// vkc::vkc(const vkc&) = default;
+vkc::vkc(vkc&&) = default;
+// vkc& vkc::operator=(const vkc&) = default;
+vkc& vkc::operator=(vkc&&) = default;
 
 vkc::vkc() {
 	/*
