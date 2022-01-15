@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -58,6 +59,7 @@ std::vector<uniform_binding> get_uniform_bindings(
 			continue;
 		}
 
+		b.name = res.name;
 		b.offset = ranges.front().offset;
 		b.size = 0;
 
@@ -73,8 +75,33 @@ std::vector<uniform_binding> get_uniform_bindings(
 				+ " : Vulkan limits the size of push_constants to "
 				  "128 Bytes. Push_constant struct too big." };
 		}
+
+		ret.push_back(std::move(b));
 	}
 
+	return ret;
+}
+
+std::array<uint32_t, 3> get_workinggroup_sizes(
+		const spirv_cross::Compiler& comp) {
+	std::array<uint32_t, 3> ret{ 1u, 1u, 1u };
+
+	spirv_cross::SpecializationConstant x_unused, y_unused, z_unused;
+	uint32_t id = comp.get_work_group_size_specialization_constants(
+			x_unused, y_unused, z_unused);
+
+	if (id == 0) {
+		throw std::runtime_error{ std::string{ __FUNCTION__ }
+			+ " : Compute shader must declare work group sizes." };
+	}
+
+	const spirv_cross::SPIRConstant& workgroup_vals = comp.get_constant(id);
+	size_t count = std::min(uint32_t(ret.size()), workgroup_vals.vector_size());
+	assert(count != 0);
+
+	for (size_t i = 0; i < count; ++i) {
+		ret[i] = workgroup_vals.vector().r[i].i32;
+	}
 	return ret;
 }
 

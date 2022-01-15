@@ -1,16 +1,16 @@
-﻿#include <fea/benchmark/benchmark.hpp>
+﻿#include <array>
+#include <fea/benchmark/benchmark.hpp>
 #include <gtest/gtest.h>
-#include <stb_image.h>
 #include <vkc/vulkan_compute.hpp>
-
-#include <array>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
-#include <intrin.h>
+#define VC_EXTRALEAN
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 namespace {
 const char* argv0 = nullptr;
@@ -28,6 +28,16 @@ struct size_block {
 };
 
 TEST(vulkan_compute, basics) {
+	std::wstring exe_dir;
+	{
+		wchar_t dir[MAX_PATH];
+		GetModuleFileNameW(nullptr, dir, MAX_PATH);
+		exe_dir = dir;
+		exe_dir = exe_dir.substr(0, exe_dir.find_last_of(L"\\\\") + 1);
+	}
+
+	std::wstring shader_path = exe_dir + L"data/shaders/mandelbrot.comp.spv";
+
 	size_block size;
 	size_t pixel_size = size.width * size_t(size.height);
 	std::vector<pixel> image_data;
@@ -38,10 +48,10 @@ TEST(vulkan_compute, basics) {
 	fea::bench::suite suite;
 	suite.title("Simulate GPU Modifier");
 	suite.benchmark("Mandelbrot generator (no push, just pull)", [&]() {
-		vkc::task t{ gpu, L"data/shaders/mandelbrot.comp.spv" };
+		vkc::task t{ gpu, shader_path.c_str() };
 
 		t.push_constant("p_constants", size);
-		t.reserve_buffer<pixel>(gpu, "buf", pixel_size);
+		t.reserve_buffer<pixel>(gpu, "buf", image_data.size());
 		t.record(size.width, size.height);
 		t.submit(gpu);
 
@@ -56,19 +66,11 @@ TEST(vulkan_compute, basics) {
 	std::vector<uint8_t> image;
 	image.resize(image_data.size() * 4);
 
-	// simd just for fun :)
-	alignas(16) std::array<float, 4> pix;
-	const __m128 mul_v = _mm_set1_ps(255.f);
-
 	for (size_t i = 0; i < image_data.size(); ++i) {
-		__m128 v0 = _mm_loadu_ps((float*)&image_data[i]);
-		__m128 answer = _mm_mul_ps(v0, mul_v);
-		_mm_store_ps(pix.data(), answer);
-
-		image[i * 4] = uint8_t(pix[0]);
-		image[i * 4 + 1] = uint8_t(pix[1]);
-		image[i * 4 + 2] = uint8_t(pix[2]);
-		image[i * 4 + 3] = uint8_t(pix[3]);
+		image[i * 4] = uint8_t(image_data[i].r * 255.f);
+		image[i * 4 + 1] = uint8_t(image_data[i].g * 255.f);
+		image[i * 4 + 2] = uint8_t(image_data[i].b * 255.f);
+		image[i * 4 + 3] = uint8_t(image_data[i].a * 255.f);
 	}
 
 	// Now we save the acquired color data to a .png.

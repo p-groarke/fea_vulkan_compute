@@ -28,7 +28,7 @@ set(FEA_CPP17 On CACHE INTERNAL "")  # Forces the value
 FetchContent_Declare(fea_libs
 	GIT_REPOSITORY https://github.com/p-groarke/fea_libs.git
 	GIT_TAG d32b37c70f4fd5e2619971f1fa7e1122ea24d256
-)
+	)
 FetchContent_MakeAvailable(fea_libs)
 
 # Main Project
@@ -41,14 +41,14 @@ set_compile_options(${PROJECT_NAME} PUBLIC)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 # set_source_files_properties(${SOURCE_FILES} PROPERTIES CXX_STANDARD 17)
 target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan TBB::TBB spirv-cross::spirv-cross-core
-		spirv-cross::spirv-cross-cpp spirv-cross::spirv-cross-reflect fea_libs
-)
+	spirv-cross::spirv-cross-cpp spirv-cross::spirv-cross-reflect fea_libs
+	)
 
 # Interface
 target_include_directories(${PROJECT_NAME} PUBLIC
 	$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
+	)
 target_include_directories(${PROJECT_NAME} PRIVATE src) # For based paths.
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/include PREFIX "Header Files" FILES ${HEADER_FILES})
@@ -61,7 +61,7 @@ install(EXPORT ${PROJECT_NAME}_targets
 	NAMESPACE ${PROJECT_NAME}::
 	FILE ${PROJECT_NAME}-config.cmake
 	DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/${PROJECT_NAME}"
-)
+	)
 
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/${INCLUDE_NAME}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
@@ -89,74 +89,65 @@ if (${FEA_VKC_TESTS})
 	# gtest_discover_tests(${TEST_NAME})
 	set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${TEST_NAME})
 
-	# Copy test data on build.
+	# Copy data and compile test shaders on build.
+	set(DATA_IN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/data)
+	set(DATA_OUT_DIR ${BINARY_OUT_DIR}/data)
+	set(STAMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/stamps)
 
+	file(GLOB_RECURSE DATA_FILES "${DATA_IN_DIR}/*")
+
+	set(STAMP_FILES "")
+	foreach(FILE ${DATA_FILES})
+		get_filename_component(FILENAME ${FILE} NAME)
+		get_filename_component(FILE_PATH ${FILE} REALPATH DIRECTORY)
+		file(RELATIVE_PATH FILE_OUTPUT_RPATH ${DATA_IN_DIR} ${FILE_PATH})
+		# message("path test : ${FILE_OUTPUT_RPATH}")
+
+		set(STAMP_FILE ${STAMP_DIR}/${FILENAME}.stamp)
+		add_custom_command(
+			OUTPUT ${STAMP_FILE}
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${STAMP_DIR}
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${DATA_OUT_DIR}
+			COMMAND ${CMAKE_COMMAND} -E touch ${STAMP_FILE}
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILE}
+			${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}
+			DEPENDS ${FILE}
+			)
+
+		set (F_EXT "")
+		get_filename_component(F_EXT ${FILE_OUTPUT_RPATH} EXT)
+		# message("extension : ${F_EXT} ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}")
+
+		if(F_EXT STREQUAL ".comp")
+			# message("\nDOING GLSLANG\n")
+			add_custom_command(
+				OUTPUT ${STAMP_FILE}
+				COMMAND glslangValidator -V ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH} -o ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}.spv
+				DEPENDS ${FILE}
+				APPEND
+				)
+		endif()
+
+		list(APPEND STAMP_FILES ${STAMP_FILE})
+	endforeach()
+
+	# Display shaders in IDE, in main project folder.
+	file(GLOB_RECURSE SHADERS "${DATA_IN_DIR}/shaders/*.glsl"
+		"${DATA_IN_DIR}/shaders/*.vert"
+		"${DATA_IN_DIR}/shaders/*.frag"
+		"${DATA_IN_DIR}/shaders/*.geom"
+		"${DATA_IN_DIR}/shaders/*.tesse"
+		"${DATA_IN_DIR}/shaders/*.tessc"
+		"${DATA_IN_DIR}/shaders/*.comp"
+		)
+
+	add_custom_target(test_shaders
+		SOURCES ${SHADERS}
+		DEPENDS ${STAMP_FILES})
+
+	# set_target_properties(Shaders PROPERTIES FOLDER ${PROJECT_NAME}) # Pretty hacky :) Doesn't work on VS
+	add_dependencies(${TEST_NAME} test_shaders)
 endif()
 
 
 
-# ##
-# # Copy data on build.
-# ##
-# set(DATA_IN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data)
-# set(DATA_OUT_DIR ${BINARY_OUT_DIR}/data)
-# set(STAMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/stamps)
-
-# file(GLOB_RECURSE DATA_FILES "${DATA_IN_DIR}/*")
-
-# set(STAMP_FILES "")
-# foreach(FILE ${DATA_FILES})
-# 	get_filename_component(FILENAME ${FILE} NAME)
-# 	get_filename_component(FILE_PATH ${FILE} REALPATH DIRECTORY)
-# 	file(RELATIVE_PATH FILE_OUTPUT_RPATH ${DATA_IN_DIR} ${FILE_PATH})
-# 	# message("path test : ${FILE_OUTPUT_RPATH}")
-
-# 	set(STAMP_FILE ${STAMP_DIR}/${FILENAME}.stamp)
-# 	add_custom_command(
-# 		OUTPUT ${STAMP_FILE}
-# 		COMMAND ${CMAKE_COMMAND} -E make_directory ${STAMP_DIR}
-# 		COMMAND ${CMAKE_COMMAND} -E make_directory ${DATA_OUT_DIR}
-# 		COMMAND ${CMAKE_COMMAND} -E touch ${STAMP_FILE}
-# 		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILE}
-# 				${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}
-# 		DEPENDS ${FILE}
-# 	)
-
-# 	set (F_EXT "")
-# 	get_filename_component(F_EXT ${FILE_OUTPUT_RPATH} EXT)
-# 	# message("extension : ${F_EXT} ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}")
-
-# 	if(F_EXT STREQUAL ".comp")
-# 		# message("\nDOING GLSLANG\n")
-# 		add_custom_command(
-# 			OUTPUT ${STAMP_FILE}
-# 			COMMAND glslangValidator -V ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH} -o ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}.spv
-# 			DEPENDS ${FILE}
-# 			APPEND
-# 		)
-# 	endif()
-
-# 	list(APPEND STAMP_FILES ${STAMP_FILE})
-# endforeach()
-
-# # Display shaders in IDE, in main project folder.
-# file(GLOB_RECURSE SHADERS "${DATA_IN_DIR}/shaders/*.glsl"
-# 	"${DATA_IN_DIR}/shaders/*.vert"
-# 	"${DATA_IN_DIR}/shaders/*.frag"
-# 	"${DATA_IN_DIR}/shaders/*.geom"
-# 	"${DATA_IN_DIR}/shaders/*.tesse"
-# 	"${DATA_IN_DIR}/shaders/*.tessc"
-# 	"${DATA_IN_DIR}/shaders/*.comp"
-# )
-
-# add_custom_target(shaders
-# 	SOURCES ${SHADERS}
-# 	DEPENDS ${STAMP_FILES})
-
-# # set_target_properties(Shaders PROPERTIES FOLDER ${PROJECT_NAME}) # Pretty hacky :) Doesn't work on VS
-# add_dependencies(${LIB_NAME} shaders)
-# add_dependencies(${PROJECT_NAME} shaders)
-
-# if (${BUILD_TESTING})
-# 	add_dependencies(${TEST_NAME} shaders)
-# endif()

@@ -452,23 +452,7 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path) {
 	init_buffers(vkc_inst, *_impl, comp);
 	init_uniforms(*_impl, comp);
 
-	spirv_cross::SpecializationConstant x_unused, y_unused, z_unused;
-	uint32_t id = comp.get_work_group_size_specialization_constants(
-			x_unused, y_unused, z_unused);
-
-	if (id == 0) {
-		throw std::runtime_error{ std::string{ __FUNCTION__ }
-			+ " : Compute shader must declare work group sizes." };
-	}
-
-	const spirv_cross::SPIRConstant& workgroup_vals = comp.get_constant(id);
-	size_t count = std::min(uint32_t(_impl->workgroupsizes.size()),
-			workgroup_vals.vector_size());
-	assert(count != 0);
-
-	for (size_t i = 0; i < count; ++i) {
-		_impl->workgroupsizes[i] = workgroup_vals.vector().r[i].i32;
-	}
+	_impl->workgroupsizes = get_workinggroup_sizes(comp);
 
 	/*
 	We create a compute pipeline here.
