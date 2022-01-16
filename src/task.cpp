@@ -334,7 +334,8 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 	that.
 	*/
 	vk::CommandPoolCreateInfo command_pool_create_info{
-		{},
+		// allows to reset command buffers (required for reuse).
+		vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
 		// the queue family of this command pool. All command buffers allocated
 		// from this command pool, must be submitted to queues of this family
 		// ONLY.

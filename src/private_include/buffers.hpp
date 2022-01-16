@@ -389,6 +389,7 @@ struct transfer_buffer {
 			&_pull_cmd,
 		};
 
+		vkc_inst.queue().waitIdle();
 		vkc_inst.queue().submit(1, &submit_info, {});
 		vkc_inst.queue().waitIdle();
 

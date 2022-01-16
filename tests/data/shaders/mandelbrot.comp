@@ -9,7 +9,7 @@ struct Pixel{
 	vec4 value;
 };
 
-layout(std140, binding = 0) buffer buf
+layout(std430, binding = 0) buffer buf
 {
 	Pixel imageData[];
 };
