@@ -485,7 +485,7 @@ void task::reserve_buffer(const char* buf_name, size_t byte_size) {
 	buf.resize(_impl->instance(), byte_size);
 	buf.bind(_impl->instance(), _impl->descriptor_sets[ids.set_id.id]);
 
-	make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
+	// make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
 }
 
 void task::push_buffer(
@@ -499,7 +499,7 @@ void task::push_buffer(
 	buf.bind(_impl->instance(), _impl->descriptor_sets[ids.set_id.id]);
 
 	make_push_cmds(_impl->instance(), _impl->command_pool.get(), buf);
-	make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
+	// make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
 	buf.push(_impl->instance(), in_data);
 }
 
@@ -517,6 +517,7 @@ void task::pull_buffer(const char* buf_name, uint8_t* out_data) {
 	transfer_buffer& buf = _impl->transfer_buffers.at(ids.binding_id.id);
 	assert(buf.gpu_buf().binding_id() == ids.binding_id);
 
+	make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
 	buf.pull(_impl->instance(), out_data);
 }
 

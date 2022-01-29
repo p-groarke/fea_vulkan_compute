@@ -45,17 +45,32 @@ jobs:
         conan --version
         conan profile new default --detect
 
-    - name: Configure
+    - name: Download swiftShader
       run: |
         cd ${{github.workspace}}
         mkdir build
         cd build
+        git clone https://github.com/p-groarke/swiftshader.git
+      # cd swiftshader
+      # git reset --hard 4db20a80409b207b3e134c93968468b7c3783eb6
+      # cd build
+      # cmake .. -DCMAKE_BUILD_TYPE=Release -Thost=x64
+      # cmake --build . --parallel --config Release
+
+    - name: Configure
+      run: |
+        cd ${{github.workspace}}/build
         cmake .. -T ${{ matrix.config.toolset_ver }} -A ${{ matrix.build_arch }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
     - name: Build
       run: |
         cd ${{github.workspace}}/build
-        cmake --build . --config ${{ matrix.build_type }}
+        cmake --build . --parallel --config ${{ matrix.build_type }}
+
+    - name: Punch-in swiftshader
+      run: |
+        cd ${{github.workspace}}/build
+        copy /b/v/y swiftshader/bin/Windows/vulkan-1.dll bin/vulkan-1.dll
 
     - name: Test
       # working-directory: ${{github.workspace}}/build
@@ -111,7 +126,7 @@ jobs:
   #   - name: Build
   #     run: |
   #       cd ${{github.workspace}}/build
-  #       cmake --build . --config ${{ matrix.build_type }}
+  #       cmake --build . --parallel --config ${{ matrix.build_type }}
 
   #   - name: Test
   #     run: |
@@ -175,7 +190,7 @@ jobs:
   #   - name: Build
   #     run: |
   #       cd ${{github.workspace}}/build
-  #       cmake --build . --config ${{ matrix.build_type }}
+  #       cmake --build . --parallel --config ${{ matrix.build_type }}
 
   #   - name: Test
   #     run: |
