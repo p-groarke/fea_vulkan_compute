@@ -70,7 +70,7 @@ jobs:
     - name: Punch-in swiftshader
       run: |
         cd ${{github.workspace}}/build
-        copy /b/v/y swiftshader/bin/Windows/vulkan-1.dll bin/vulkan-1.dll
+        copy /b/v/y swiftshader\bin\Windows\vulkan-1.dll bin\vulkan-1.dll
 
     - name: Test
       # working-directory: ${{github.workspace}}/build
