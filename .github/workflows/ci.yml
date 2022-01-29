@@ -61,8 +61,7 @@ jobs:
       # working-directory: ${{github.workspace}}/build
       run: |
         cd ${{github.workspace}}/build
-        ./bin/fea_libs_tests
-        ./bin/fea_libs_nothrow_tests
+        ./bin/fea_vkc_tests
 
 
   Clang:
@@ -117,8 +116,7 @@ jobs:
     - name: Test
       run: |
         cd ${{github.workspace}}/build
-        ./bin/fea_libs_tests
-        ./bin/fea_libs_nothrow_tests
+        ./bin/fea_vkc_tests
 
 
   Gcc:
@@ -182,5 +180,4 @@ jobs:
     - name: Test
       run: |
         cd ${{github.workspace}}/build
-        ./bin/fea_libs_tests
-        ./bin/fea_libs_nothrow_tests
+        ./bin/fea_vkc_tests
