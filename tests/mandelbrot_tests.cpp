@@ -1,4 +1,5 @@
 #include <fea/benchmark/benchmark.hpp>
+#include <fea/utils/file.hpp>
 #include <gtest/gtest.h>
 #include <string>
 #include <vkc/vulkan_compute.hpp>
@@ -8,7 +9,7 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
-extern std::wstring exe_dir();
+extern const char* argv0;
 
 namespace {
 struct pixel {
@@ -24,8 +25,8 @@ struct size_block {
 };
 
 TEST(vulkan_compute, basics) {
-
-	std::wstring shader_path = exe_dir() + L"data/shaders/mandelbrot.comp.spv";
+	std::filesystem::path exe_path = fea::executable_dir(argv0);
+	std::wstring shader_path = exe_path / L"data/shaders/mandelbrot.comp.spv";
 
 	size_block size;
 	size_t pixel_size = size.width * size_t(size.height);
@@ -41,14 +42,14 @@ TEST(vulkan_compute, basics) {
 
 		t.push_constant("p_constants", size);
 		t.reserve_buffer<pixel>("buf", image_data.size());
-		t.record(size.width, size.height);
-		t.submit();
+		t.submit(size.width, size.height, 1);
 
 		t.pull_buffer("buf", &image_data);
 	});
 
 	suite.print();
 
+	// TODO : Compare test image with saved image.
 	// Save png.
 	{
 		std::vector<uint8_t> image;

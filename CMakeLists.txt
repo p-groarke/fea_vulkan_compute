@@ -1,6 +1,6 @@
-include(${CMAKE_SOURCE_DIR}/CMakeLists.global.txt)
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.global.txt)
 
-cmake_minimum_required (VERSION 3.20)
+cmake_minimum_required (VERSION 3.21)
 project(fea_vkc VERSION 1.0.0 LANGUAGES CXX)
 
 include(FetchContent)
@@ -10,27 +10,26 @@ include(GoogleTest)
 
 # User options
 option(FEA_VKC_TESTS "Build and run tests." On)
-# option(FEA_VKC_BENCHMARKS "Build and run bencharks, requires tests." Off)
+option(FEA_VKC_BENCHMARKS "Build and run bencharks, requires tests." Off)
 
-# The library itself is c++17, but we make the unit-tests c++14
-# to guarantee it can link or be consumed appropriately.
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 # Output to predictable location.
 set_output_dir(${CMAKE_BINARY_DIR}/bin)
 
 # External dependencies.
 pull_conan()
-find_package(TBB CONFIG REQUIRED)
-find_package(Vulkan REQUIRED)
-find_package(spirv-cross CONFIG REQUIRED)
+find_package(TBB CONFIG REQUIRED QUIET)
+find_package(Vulkan CONFIG REQUIRED QUIET)
+find_package(vulkan-validationlayers CONFIG REQUIRED QUIET)
+find_package(spirv-cross CONFIG REQUIRED QUIET)
 
 set(FEA_TESTS OFF CACHE INTERNAL "")  # Forces the value
 set(FEA_CPP17 On CACHE INTERNAL "")  # Forces the value
 FetchContent_Declare(fea_libs
 	GIT_REPOSITORY https://github.com/p-groarke/fea_libs.git
-	GIT_TAG d32b37c70f4fd5e2619971f1fa7e1122ea24d256
-	)
+	GIT_TAG 1061297e9eb017e39c560cdf8094285a0ff11006
+)
 FetchContent_MakeAvailable(fea_libs)
 
 # Main Project
@@ -40,17 +39,21 @@ file(GLOB_RECURSE SOURCE_FILES "src/*.cpp" "src/*.hpp")
 
 add_library(${PROJECT_NAME} ${HEADER_FILES} ${SOURCE_FILES})
 set_compile_options(${PROJECT_NAME} PUBLIC)
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
-# set_source_files_properties(${SOURCE_FILES} PROPERTIES CXX_STANDARD 17)
-target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan TBB::TBB spirv-cross::spirv-cross-core
-	spirv-cross::spirv-cross-cpp spirv-cross::spirv-cross-reflect fea_libs
-	)
+target_link_libraries(${PROJECT_NAME} PUBLIC TBB::TBB)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+	Vulkan::Vulkan
+	vulkan-validationlayers::vulkan-validationlayers
+	spirv-cross::spirv-cross-core
+	spirv-cross::spirv-cross-cpp
+	spirv-cross::spirv-cross-reflect
+	fea_libs
+)
 
 # Interface
 target_include_directories(${PROJECT_NAME} PUBLIC
 	$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-	)
+)
 target_include_directories(${PROJECT_NAME} PRIVATE src) # For based paths.
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/include PREFIX "Header Files" FILES ${HEADER_FILES})
@@ -63,9 +66,20 @@ install(EXPORT ${PROJECT_NAME}_targets
 	NAMESPACE ${PROJECT_NAME}::
 	FILE ${PROJECT_NAME}-config.cmake
 	DESTINATION "${CMAKE_INSTALL_DATADIR}/cmake/${PROJECT_NAME}"
-	)
+)
 
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/${INCLUDE_NAME}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+
+# Unfortunately, we must add or modify an environment for the validation layers.
+set(VK_LAYR_PATH)
+set(VK_LAYR_DIR ${CMAKE_BINARY_DIR}/bin)
+cmake_path(NATIVE_PATH VK_LAYR_DIR VK_LAYR_PATH)
+if (WIN32)
+	execute_process(COMMAND SETX VK_LAYER_PATH "${VK_LAYR_PATH}"
+		COMMAND_ECHO STDOUT
+	)
+endif()
+
 
 # Tests
 if (${FEA_VKC_TESTS})
@@ -84,9 +98,9 @@ if (${FEA_VKC_TESTS})
 
 	source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/tests PREFIX "Source Files" FILES ${TEST_SOURCES})
 
-	# if (${FEA_VKC_BENCHMARKS})
-	# 	target_compile_definitions(${TEST_NAME} PRIVATE FEA_VKC_BENCHMARKS)
-	# endif()
+	if (${FEA_VKC_BENCHMARKS})
+		target_compile_definitions(${TEST_NAME} PRIVATE FEA_VKC_BENCHMARKS)
+	endif()
 
 	# gtest_discover_tests(${TEST_NAME})
 	set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${TEST_NAME})
@@ -114,7 +128,7 @@ if (${FEA_VKC_TESTS})
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FILE}
 			${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}
 			DEPENDS ${FILE}
-			)
+		)
 
 		set (F_EXT "")
 		get_filename_component(F_EXT ${FILE_OUTPUT_RPATH} EXT)
@@ -124,10 +138,10 @@ if (${FEA_VKC_TESTS})
 			# message("\nDOING GLSLANG\n")
 			add_custom_command(
 				OUTPUT ${STAMP_FILE}
-				COMMAND glslangValidator -V ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH} -o ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}.spv
+				COMMAND ${CMAKE_BINARY_DIR}/tools/glslangValidator -V ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH} -o ${DATA_OUT_DIR}/${FILE_OUTPUT_RPATH}.spv
 				DEPENDS ${FILE}
 				APPEND
-				)
+			)
 		endif()
 
 		list(APPEND STAMP_FILES ${STAMP_FILE})
@@ -141,11 +155,12 @@ if (${FEA_VKC_TESTS})
 		"${DATA_IN_DIR}/shaders/*.tesse"
 		"${DATA_IN_DIR}/shaders/*.tessc"
 		"${DATA_IN_DIR}/shaders/*.comp"
-		)
+	)
 
 	add_custom_target(test_shaders
 		SOURCES ${SHADERS}
-		DEPENDS ${STAMP_FILES})
+		DEPENDS ${STAMP_FILES}
+	)
 
 	# set_target_properties(Shaders PROPERTIES FOLDER ${PROJECT_NAME}) # Pretty hacky :) Doesn't work on VS
 	add_dependencies(${TEST_NAME} test_shaders)

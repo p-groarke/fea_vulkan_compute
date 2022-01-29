@@ -3,12 +3,17 @@
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1 ) in;
 
-layout(std430, binding = 0) buffer buf
-{
-	float data[];
+layout(std430, binding = 0) buffer buf1 {
+	float buf1_data[];
+};
+layout(std430, binding = 1) buffer buf2 {
+	float buf2_data[];
+};
+layout(std430, binding = 2) buffer out_buf {
+	float out_data[];
 };
 
-layout(push_constant, std140) uniform SizeBlock {
+layout(push_constant, std140) uniform test_constants {
 	uint test_num;
 	float mul;
 //	float two;
@@ -16,17 +21,22 @@ layout(push_constant, std140) uniform SizeBlock {
 } p_constants;
 
 void main() {
-//	p_constants.two;
-//	p_constants.three;
-
 	switch (p_constants.test_num) {
 	case 0: {
 		// Test 0 does nothing.
 	} break;
 	case 1: {
-		for (int i = 0; i < data.length(); ++i)
+		// Test 1, multiply buf values with mul.
+		for (int i = 0; i < buf1_data.length(); ++i)
 		{
-			data[i] *= p_constants.mul;
+			buf1_data[i] *= p_constants.mul;
+		}
+	} break;
+	case 2: {
+		// Test2, add buffers.
+		for (int i = 0; i < buf1_data.length(); ++i)
+		{
+			out_data[i] = buf1_data[i] + buf2_data[i];
 		}
 	} break;
 	}

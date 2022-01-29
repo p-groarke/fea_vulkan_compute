@@ -43,16 +43,18 @@ struct task : pimpl_ptr<detail::task_impl> {
 	template <class T>
 	void push_buffer(const char* buf_name, const std::vector<T>& in_data);
 
-	// This records the submit work to be done. You should call this only once
-	// (while you can call submit as many times are required).
+	// Executes the compute shader.
+	// Blocking.
+	// Uses working group sizes width = 1, height = 1, depth = 1.
+	// The width, height and depth will be divided by shader work group
+	// sizes, to compute the number of group counts.
+	void submit();
+
+	// Executes the compute shader with provided working group sizes.
+	// Blocking.
 	// The provided width, height and depth will be divided by shader work group
 	// sizes, to compute the number of group counts.
-	//
-	// TODO : Remove record and figure out if we need to record ourselves.
-	void record(size_t width = 1u, size_t height = 1u, size_t depth = 1u);
-
-	// Executes the compute shader. Blocking.
-	void submit();
+	void submit(size_t width, size_t height, size_t depth);
 
 	// Copies your gpu buffer into data.
 	template <class T>

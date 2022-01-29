@@ -1,6 +1,6 @@
 ﻿#include "vkc/task.hpp"
-#include "private_include/buffers.hpp"
 #include "private_include/reflection.hpp"
+#include "private_include/transfer_buffer.hpp"
 #include "vkc/vkc.hpp"
 
 #include <algorithm>
@@ -20,8 +20,8 @@ namespace vkc {
 namespace {
 // A push constant (aka uniform).
 struct push_constant_info {
-	uint32_t set = std::numeric_limits<uint32_t>::max();
-	uint32_t binding = std::numeric_limits<uint32_t>::max();
+	set_id_v set;
+	binding_id_v binding;
 	size_t offset = 0;
 	size_t byte_size = 0;
 	const void* constant = nullptr;
@@ -74,10 +74,10 @@ struct task_impl {
 	std::vector<vk::PushConstantRange> push_constants_ranges;
 
 	// Our buffers.
-	fea::unsigned_map<set_id_t, transfer_buffer> transfer_buffers;
+	fea::unsigned_map<binding_id_t, transfer_buffer> transfer_buffers;
 
 	// string -> id
-	std::unordered_map<std::string, set_id_t> buffer_name_to_set_id;
+	std::unordered_map<std::string, buffer_ids> buffer_name_to_id;
 	std::unordered_map<std::string, push_constant_info>
 			push_constants_name_to_info;
 
@@ -98,14 +98,17 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 	std::vector<buffer_binding> buffer_bindings = reflect_buffer_bindings(comp);
 
 	// Gathered info to call create once.
-	fea::unsigned_map<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>
-			layout_bindings;
+	std::vector<vk::DescriptorSetLayoutBinding> layout_bindings;
+	layout_bindings.reserve(buffer_bindings.size());
 
 	for (const buffer_binding& b : buffer_bindings) {
 		// Add empty buffer, ready for future filling.
-		buffer_ids ids{ b.set_id, b.binding_id };
-		impl.transfer_buffers.insert({ b.set_id, transfer_buffer{ ids } });
-		impl.buffer_name_to_set_id[b.name] = b.set_id;
+		buffer_ids ids{ b.ids.set_id, b.ids.binding_id };
+		impl.transfer_buffers.insert({
+				b.ids.binding_id.id,
+				transfer_buffer{ ids },
+		});
+		impl.buffer_name_to_id[b.name] = ids;
 
 		/*
 		 Here we specify a binding of type VK_DESCRIPTOR_TYPE_STORAGE_BUFFER to
@@ -113,12 +116,12 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 		 buf in the compute shader.
 		*/
 		vk::DescriptorSetLayoutBinding descriptor_set_layout_binding{
-			b.binding_id,
+			b.ids.binding_id.id,
 			vk::DescriptorType::eStorageBuffer,
 			1,
 			vk::ShaderStageFlagBits::eCompute,
 		};
-		layout_bindings[b.set_id].push_back(descriptor_set_layout_binding);
+		layout_bindings.push_back(descriptor_set_layout_binding);
 	}
 
 	/*
@@ -126,33 +129,27 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 	 descriptors to resources in the shader.
 	*/
 	std::vector<vk::DescriptorPoolSize> pool_sizes;
-	for (const std::pair<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>&
-					kv : layout_bindings) {
+	vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
+		{},
+		uint32_t(layout_bindings.size()),
+		layout_bindings.data(),
+	};
 
-		const std::vector<vk::DescriptorSetLayoutBinding>& bindings = kv.second;
-		vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
-			{},
-			uint32_t(bindings.size()),
-			bindings.data(),
-		};
-
-		// Create the descriptor set layout.
-		impl.descriptor_set_layouts.push_back(
-				vkc_inst.device().createDescriptorSetLayoutUnique(
-						descriptor_set_layout_create_info));
+	// Create the descriptor set layout.
+	impl.descriptor_set_layouts.push_back(
+			vkc_inst.device().createDescriptorSetLayoutUnique(
+					descriptor_set_layout_create_info));
 
 
-		/*
-		 So we will allocate a descriptor set here.
-		 But we need to first create a descriptor pool to do that.
-		*/
-		vk::DescriptorPoolSize descriptor_pool_size{
-			vk::DescriptorType::eStorageBuffer,
-			uint32_t(bindings.size()),
-		};
-		pool_sizes.push_back(descriptor_pool_size);
-	}
-
+	/*
+	 So we will allocate a descriptor set here.
+	 But we need to first create a descriptor pool to do that.
+	*/
+	vk::DescriptorPoolSize descriptor_pool_size{
+		vk::DescriptorType::eStorageBuffer,
+		uint32_t(layout_bindings.size()),
+	};
+	pool_sizes.push_back(descriptor_pool_size);
 
 	vk::DescriptorPoolCreateInfo descriptor_pool_create_info{
 		{},
@@ -194,8 +191,8 @@ void gather_uniform_descriptorsets(
 
 	for (const uniform_binding& b : uniform_bindings) {
 		impl.push_constants_name_to_info[b.name] = {
-			b.set_id,
-			b.binding_id,
+			b.ids.set_id,
+			b.ids.binding_id,
 			b.offset,
 			b.size,
 			nullptr,
@@ -323,8 +320,16 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 	/*
 	 Now, we finally create the compute pipeline.
 	*/
-	_impl->pipeline = vkc_inst.device().createComputePipelineUnique(
-			{}, pipeline_create_info);
+	vk::ResultValue<vk::UniquePipeline> res
+			= vkc_inst.device().createComputePipelineUnique(
+					{}, pipeline_create_info);
+
+	if (res.result != vk::Result::eSuccess) {
+		fprintf(stderr, "CreateComputePipeline failed with result : '%d'\n",
+				res.result);
+	}
+
+	_impl->pipeline = std::move(res.value);
 
 
 	/*
@@ -368,60 +373,66 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 	_impl->pipeline_submit_cmd = std::move(new_buf.back());
 }
 
-void task::record(
-		size_t width /*= 1u*/, size_t height /*= 1u*/, size_t depth /*= 1u*/) {
-	assert(_impl->pipeline_submit_cmd != vk::CommandBuffer{});
-
-	// This records the "main task" of our compute shader and stores it for
-	// later submitting.
-	vk::CommandBufferBeginInfo begin_info{
-		// flags optional
-	};
-
-	// start recording commands.
-	_impl->pipeline_submit_cmd.begin(begin_info);
-
-	/*
-	We need to bind a pipeline, AND a descriptor set before we dispatch.
-	The validation layer will NOT give warnings if you forget these, so be very
-	careful not to forget them.
-	*/
-	_impl->pipeline_submit_cmd.bindPipeline(
-			vk::PipelineBindPoint::eCompute, _impl->pipeline.get());
-	_impl->pipeline_submit_cmd.bindDescriptorSets(
-			vk::PipelineBindPoint::eCompute, _impl->pipeline_layout.get(), 0, 1,
-			&_impl->descriptor_sets.back(), 0, nullptr);
-
-	for (std::pair<const std::string, push_constant_info>& kv :
-			_impl->push_constants_name_to_info) {
-		push_constant_info& info = kv.second;
-		if (info.constant == nullptr) {
-			continue;
-		}
-
-		_impl->pipeline_submit_cmd.pushConstants(_impl->pipeline_layout.get(),
-				vk::ShaderStageFlagBits::eCompute, uint32_t(info.offset),
-				uint32_t(info.byte_size), info.constant);
-
-		info.constant = nullptr;
-	}
-
-	/*
-	 Calling vkCmdDispatch basically starts the compute pipeline, and executes
-	 the compute shader. The number of workgroups is specified in the
-	 arguments.
-	*/
-	uint32_t x = uint32_t(std::ceil(width / double(_impl->workgroupsizes[0])));
-	uint32_t y = uint32_t(std::ceil(height / double(_impl->workgroupsizes[1])));
-	uint32_t z = uint32_t(std::ceil(depth / double(_impl->workgroupsizes[2])));
-	_impl->pipeline_submit_cmd.dispatch(x, y, z);
-
-	// end recording commands.
-	_impl->pipeline_submit_cmd.end();
+void task::submit() {
+	submit(1, 1, 1);
 }
 
+void task::submit(size_t width, size_t height, size_t depth) {
+	{
+		assert(_impl->pipeline_submit_cmd != vk::CommandBuffer{});
 
-void task::submit() {
+		// This records the "main task" of our compute shader and stores it for
+		// later submitting.
+		vk::CommandBufferBeginInfo begin_info{
+			// flags optional
+		};
+
+		// start recording commands.
+		_impl->pipeline_submit_cmd.begin(begin_info);
+
+		/*
+		We need to bind a pipeline, AND a descriptor set before we dispatch.
+		The validation layer will NOT give warnings if you forget these, so be
+		very careful not to forget them.
+		*/
+		_impl->pipeline_submit_cmd.bindPipeline(
+				vk::PipelineBindPoint::eCompute, _impl->pipeline.get());
+		_impl->pipeline_submit_cmd.bindDescriptorSets(
+				vk::PipelineBindPoint::eCompute, _impl->pipeline_layout.get(),
+				0, 1, &_impl->descriptor_sets.back(), 0, nullptr);
+
+		for (std::pair<const std::string, push_constant_info>& kv :
+				_impl->push_constants_name_to_info) {
+			push_constant_info& info = kv.second;
+			if (info.constant == nullptr) {
+				continue;
+			}
+
+			_impl->pipeline_submit_cmd.pushConstants(
+					_impl->pipeline_layout.get(),
+					vk::ShaderStageFlagBits::eCompute, uint32_t(info.offset),
+					uint32_t(info.byte_size), info.constant);
+
+			info.constant = nullptr;
+		}
+
+		/*
+		 Calling vkCmdDispatch basically starts the compute pipeline, and
+		 executes the compute shader. The number of workgroups is specified in
+		 the arguments.
+		*/
+		uint32_t x
+				= uint32_t(std::ceil(width / double(_impl->workgroupsizes[0])));
+		uint32_t y = uint32_t(
+				std::ceil(height / double(_impl->workgroupsizes[1])));
+		uint32_t z
+				= uint32_t(std::ceil(depth / double(_impl->workgroupsizes[2])));
+		_impl->pipeline_submit_cmd.dispatch(x, y, z);
+
+		// end recording commands.
+		_impl->pipeline_submit_cmd.end();
+	}
+
 	assert(_impl->pipeline_submit_cmd != vk::CommandBuffer{});
 
 	/*
@@ -441,7 +452,12 @@ void task::submit() {
 	fence.
 	*/
 	_impl->instance().queue().waitIdle();
-	_impl->instance().queue().submit(1, &submit_info, {});
+	vk::Result res = _impl->instance().queue().submit(1, &submit_info, {});
+	if (res != vk::Result::eSuccess) {
+		fprintf(stderr, "Main task submit failed with result : '%d'\n", res);
+		return;
+	}
+
 	_impl->instance().queue().waitIdle();
 }
 
@@ -461,44 +477,45 @@ void task::push_constant(
 }
 
 void task::reserve_buffer(const char* buf_name, size_t byte_size) {
-	set_id_t id = _impl->buffer_name_to_set_id.at(buf_name);
-	transfer_buffer& buf = _impl->transfer_buffers.at(id);
-	assert(buf.gpu_buf().set_id() == id);
+	buffer_ids ids = _impl->buffer_name_to_id.at(buf_name);
+	transfer_buffer& buf = _impl->transfer_buffers.at(ids.binding_id.id);
+	assert(buf.gpu_buf().binding_id() == ids.binding_id);
 
 	// won't allocate if preallocated
 	buf.resize(_impl->instance(), byte_size);
-	buf.bind(_impl->instance(), _impl->descriptor_sets[id]);
+	buf.bind(_impl->instance(), _impl->descriptor_sets[ids.set_id.id]);
+
+	make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
 }
 
 void task::push_buffer(
 		const char* buf_name, const uint8_t* in_data, size_t byte_size) {
-	set_id_t id = _impl->buffer_name_to_set_id.at(buf_name);
-	transfer_buffer& buf = _impl->transfer_buffers.at(id);
-	assert(buf.gpu_buf().set_id() == id);
+	buffer_ids ids = _impl->buffer_name_to_id.at(buf_name);
+	transfer_buffer& buf = _impl->transfer_buffers.at(ids.binding_id.id);
+	assert(buf.gpu_buf().binding_id() == ids.binding_id);
 
 	// won't allocate if preallocated
 	buf.resize(_impl->instance(), byte_size);
-	buf.bind(_impl->instance(), _impl->descriptor_sets[id]);
+	buf.bind(_impl->instance(), _impl->descriptor_sets[ids.set_id.id]);
 
 	make_push_cmds(_impl->instance(), _impl->command_pool.get(), buf);
+	make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
 	buf.push(_impl->instance(), in_data);
 }
 
 
 size_t task::get_buffer_byte_size(const char* buf_name) const {
-	set_id_t id = _impl->buffer_name_to_set_id.at(buf_name);
-	const transfer_buffer& buf = _impl->transfer_buffers.at(id);
-	assert(buf.gpu_buf().set_id() == id);
+	buffer_ids ids = _impl->buffer_name_to_id.at(buf_name);
+	const transfer_buffer& buf = _impl->transfer_buffers.at(ids.binding_id.id);
+	assert(buf.gpu_buf().binding_id() == ids.binding_id);
 
 	return buf.byte_size();
 }
 
 void task::pull_buffer(const char* buf_name, uint8_t* out_data) {
-	set_id_t id = _impl->buffer_name_to_set_id.at(buf_name);
-	transfer_buffer& buf = _impl->transfer_buffers.at(id);
-	assert(buf.gpu_buf().set_id() == id);
-
-	make_pull_cmds(_impl->instance(), _impl->command_pool.get(), buf);
+	buffer_ids ids = _impl->buffer_name_to_id.at(buf_name);
+	transfer_buffer& buf = _impl->transfer_buffers.at(ids.binding_id.id);
+	assert(buf.gpu_buf().binding_id() == ids.binding_id);
 
 	buf.pull(_impl->instance(), out_data);
 }

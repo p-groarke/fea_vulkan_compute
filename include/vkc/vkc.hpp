@@ -27,7 +27,7 @@ struct vkc : pimpl_ptr<detail::vkc_impl> {
 	vkc(const vkc&) = delete;
 	vkc& operator=(const vkc&) = delete;
 
-	// These are used internally.
+	// These functions are used internally :
 
 	const vk::Instance& instance() const;
 	vk::Instance& instance();

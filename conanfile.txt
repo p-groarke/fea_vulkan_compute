@@ -2,6 +2,10 @@
 gtest/1.10.0
 onetbb/2021.3.0
 stb/20200203
+vulkan-loader/1.2.198.0
+spirv-tools/2021.4
+vulkan-validationlayers/1.2.198.0
+glslang/11.7.0
 spirv-cross/cci.20211113
 
 [generators]
@@ -16,3 +20,5 @@ tbb:tbbmalloc=True
 bin, *.pdb -> ./bin
 bin, *.pdb -> ./lib
 bin, *.dll -> ./bin
+bin, *.exe -> ./tools
+bin, VkLayer_khronos_validation.json -> ./bin

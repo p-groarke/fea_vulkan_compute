@@ -91,11 +91,11 @@ vkc::vkc() {
 				= vk::enumerateInstanceLayerProperties();
 
 		/*
-		And then we simply check if VK_LAYER_LUNARG_standard_validation is
+		And then we simply check if VK_LAYER_KHRONOS_validation is
 		among the supported layers.
 		*/
 		{
-			const char* layer_name = "VK_LAYER_LUNARG_standard_validation";
+			const char* layer_name = "VK_LAYER_KHRONOS_validation";
 			auto it = std::find_if(layer_properties.begin(),
 					layer_properties.end(),
 					[&](const vk::LayerProperties& prop) {
@@ -104,7 +104,7 @@ vkc::vkc() {
 
 			if (it == layer_properties.end()) {
 				fprintf(stderr,
-						"Layer VK_LAYER_LUNARG_standard_validation not "
+						"Layer VK_LAYER_KHRONOS_validation not "
 						"supported\n");
 				std::exit(-1);
 			}
@@ -258,7 +258,7 @@ vkc::vkc() {
 
 	vk::PhysicalDeviceProperties gpu_properties
 			= _impl->physical_device.getProperties();
-	printf("Selected GPU : '%s'\n", gpu_properties.deviceName);
+	printf("Selected GPU : '%s'\n", gpu_properties.deviceName.data());
 
 	// for (const vk::PhysicalDevice& device :
 	//		_instance.enumeratePhysicalDevices()) {

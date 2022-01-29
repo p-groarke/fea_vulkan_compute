@@ -1,5 +1,5 @@
 #pragma once
-#include "private_include/buffers.hpp"
+#include "private_include/ids.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,14 +12,12 @@
 
 namespace vkc {
 struct buffer_binding {
-	set_id_t set_id = (std::numeric_limits<uint32_t>::max)();
-	binding_id_t binding_id = (std::numeric_limits<uint32_t>::max)();
+	buffer_ids ids;
 	std::string name;
 };
 
 struct uniform_binding {
-	set_id_t set_id = (std::numeric_limits<uint32_t>::max)();
-	binding_id_t binding_id = (std::numeric_limits<uint32_t>::max)();
+	buffer_ids ids;
 	std::string name;
 	size_t offset = 0;
 	size_t size = 0;
@@ -34,8 +32,9 @@ std::vector<buffer_binding> reflect_buffer_bindings(
 
 	for (const spirv_cross::Resource& res : resources.storage_buffers) {
 		buffer_binding b;
-		b.set_id = comp.get_decoration(res.id, spv::DecorationDescriptorSet);
-		b.binding_id = comp.get_decoration(res.id, spv::DecorationBinding);
+		b.ids.set_id
+				= comp.get_decoration(res.id, spv::DecorationDescriptorSet);
+		b.ids.binding_id = comp.get_decoration(res.id, spv::DecorationBinding);
 		b.name = res.name;
 		ret.push_back(std::move(b));
 	}
@@ -51,8 +50,9 @@ std::vector<uniform_binding> reflect_uniform_bindings(
 
 	for (const spirv_cross::Resource& res : resources.push_constant_buffers) {
 		uniform_binding b;
-		b.set_id = comp.get_decoration(res.id, spv::DecorationDescriptorSet);
-		b.binding_id = comp.get_decoration(res.id, spv::DecorationBinding);
+		b.ids.set_id
+				= comp.get_decoration(res.id, spv::DecorationDescriptorSet);
+		b.ids.binding_id = comp.get_decoration(res.id, spv::DecorationBinding);
 
 		spirv_cross::SmallVector<spirv_cross::BufferRange> ranges
 				= comp.get_active_buffer_ranges(res.id);
