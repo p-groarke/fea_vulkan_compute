@@ -12,6 +12,8 @@ include(GoogleTest)
 option(FEA_VKC_TESTS "Build and run tests." On)
 option(FEA_VKC_BENCHMARKS "Build and run bencharks, requires tests." Off)
 
+# TODO : Error on 32bit build.
+
 set(CMAKE_CXX_STANDARD 17)
 
 # Output to predictable location.
