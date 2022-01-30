@@ -106,10 +106,10 @@ vkc::vkc() {
 				fprintf(stderr,
 						"Layer VK_LAYER_KHRONOS_validation not "
 						"supported\n");
-				std::exit(-1);
+				// std::exit(-1);
+			} else {
+				_impl->enabled_layers.push_back(layer_name);
 			}
-
-			_impl->enabled_layers.push_back(layer_name);
 		}
 
 		/*

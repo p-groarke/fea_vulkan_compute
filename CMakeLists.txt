@@ -12,6 +12,8 @@ include(GoogleTest)
 option(FEA_VKC_TESTS "Build and run tests." On)
 option(FEA_VKC_BENCHMARKS "Build and run bencharks, requires tests." Off)
 
+# TODO : Error on 32bit build.
+
 set(CMAKE_CXX_STANDARD 17)
 
 # Output to predictable location.
@@ -28,7 +30,7 @@ set(FEA_TESTS OFF CACHE INTERNAL "")  # Forces the value
 set(FEA_CPP17 On CACHE INTERNAL "")  # Forces the value
 FetchContent_Declare(fea_libs
 	GIT_REPOSITORY https://github.com/p-groarke/fea_libs.git
-	GIT_TAG 1061297e9eb017e39c560cdf8094285a0ff11006
+	GIT_TAG 689b9457fd49b627c5f8302e66563a4a21eb5422
 )
 FetchContent_MakeAvailable(fea_libs)
 
