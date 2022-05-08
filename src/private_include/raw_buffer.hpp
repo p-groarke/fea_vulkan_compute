@@ -2,6 +2,7 @@
 #include "private_include/ids.hpp"
 #include "vkc/vkc.hpp"
 
+#include <fea/utils/throw.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace vkc {
@@ -36,9 +37,9 @@ vk::MemoryAllocateInfo find_memory_type(const vkc& vkc_inst,
 		}
 	}
 
-	throw std::runtime_error{
-		"vkc::task : Couldn't find required memory type."
-	};
+	fea::maybe_throw<std::runtime_error>(
+			__FUNCTION__, __LINE__, "Couldn't find required memory type.");
+	return {};
 }
 
 vk::UniqueBuffer make_unique_buffer(
@@ -154,8 +155,8 @@ struct raw_buffer {
 
 	void bind(const vkc& vkc_inst, vk::DescriptorSet target_desc_set) {
 		if (!has_binding() || !has_set()) {
-			throw std::runtime_error{ std::string{ __FUNCTION__ }
-				+ " : Trying to bind a buffer without set_id and binding_id." };
+			fea::maybe_throw<std::runtime_error>(__FUNCTION__, __LINE__,
+					"Trying to bind a buffer without set_id and binding_id.");
 		}
 
 		if (_bound_byte_size == _byte_size) {
@@ -173,7 +174,7 @@ struct raw_buffer {
 		vk::WriteDescriptorSet write_descriptor_set{
 			target_desc_set, // write to this descriptor set.
 			binding_id().id, // write to the binding.
-			{}, //??
+			0, // the array element we are writing to
 			1, // update a single descriptor.
 			vk::DescriptorType::eStorageBuffer,
 			nullptr,

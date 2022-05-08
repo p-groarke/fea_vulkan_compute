@@ -20,6 +20,7 @@ TEST(task, basics) {
 			= exe_path / L"data/shaders/task_tests.comp.spv";
 
 	std::vector<float> sent_data(100);
+	std::vector<float> empty_vec;
 	std::iota(sent_data.begin(), sent_data.end(), 0.f);
 	std::vector<float> recieved_data;
 
@@ -35,6 +36,7 @@ TEST(task, basics) {
 
 		t.push_constant("p_constants", constants);
 		t.push_buffer("buf1", sent_data);
+		// t.push_buffer("buf2", empty_vec);
 		t.submit();
 		t.pull_buffer("buf1", &recieved_data);
 
@@ -115,42 +117,43 @@ TEST(task, basics) {
 	}
 }
 
-TEST(task, threading) {
-	// constexpr size_t num_tasks = 1'000;
-	// std::filesystem::path exe_path = fea::executable_dir(argv0);
-	// std::filesystem::path shader_path
-	//		= exe_path / L"data/shaders/task_tests.comp.spv";
-
-	// std::vector<float> sent_data(100);
-	// std::iota(sent_data.begin(), sent_data.end(), 0.f);
-
-	// vkc::vkc gpu;
-
-	//// Use grainsize 1 to force many threads.
-	// tbb::parallel_for(tbb::blocked_range<size_t>{ 0, num_tasks, 1 },
-	//		[&](const tbb::blocked_range<size_t>& range) {
-	//			for (size_t i = range.begin(); i < range.end(); ++i) {
-	//				vkc::task t{ gpu, shader_path.c_str() };
-	//				std::vector<float> recieved_data;
-
-	//				p_constants constants;
-	//				constants.test_num = 2;
-
-	//				t.push_constant("p_constants", constants);
-	//				t.push_buffer("buf1", sent_data);
-	//				t.push_buffer("buf2", sent_data);
-	//				t.reserve_buffer<float>("out_buf", sent_data.size());
-	//				t.submit();
-	//				t.pull_buffer("out_buf", &recieved_data);
-
-	//				EXPECT_EQ(sent_data.size(), recieved_data.size());
-
-	//				for (size_t j = 0; j < recieved_data.size(); ++j) {
-	//					float expected = sent_data[j] + sent_data[j];
-	//					EXPECT_EQ(expected, recieved_data[j]);
-	//				}
-	//			}
-	//		});
-}
+//// TODO
+// TEST(task, task_level_threading) {
+//	constexpr size_t num_tasks = 1'000;
+//	std::filesystem::path exe_path = fea::executable_dir(argv0);
+//	std::filesystem::path shader_path
+//			= exe_path / L"data/shaders/task_tests.comp.spv";
+//
+//	std::vector<float> sent_data(100);
+//	std::iota(sent_data.begin(), sent_data.end(), 0.f);
+//
+//	vkc::vkc gpu;
+//
+//	// Use grainsize 1 to force many threads.
+//	tbb::parallel_for(tbb::blocked_range<size_t>{ 0, num_tasks, 1 },
+//			[&](const tbb::blocked_range<size_t>& range) {
+//				for (size_t i = range.begin(); i < range.end(); ++i) {
+//					vkc::task t{ gpu, shader_path.c_str() };
+//					std::vector<float> recieved_data;
+//
+//					p_constants constants;
+//					constants.test_num = 2;
+//
+//					t.push_constant("p_constants", constants);
+//					t.push_buffer("buf1", sent_data);
+//					t.push_buffer("buf2", sent_data);
+//					t.reserve_buffer<float>("out_buf", sent_data.size());
+//					t.submit();
+//					t.pull_buffer("out_buf", &recieved_data);
+//
+//					EXPECT_EQ(sent_data.size(), recieved_data.size());
+//
+//					for (size_t j = 0; j < recieved_data.size(); ++j) {
+//						float expected = sent_data[j] + sent_data[j];
+//						EXPECT_EQ(expected, recieved_data[j]);
+//					}
+//				}
+//			});
+//}
 
 } // namespace

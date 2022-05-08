@@ -7,7 +7,7 @@ using binding_id_t = uint32_t;
 
 struct set_id_v {
 	constexpr set_id_v() = default;
-	constexpr set_id_v(uint32_t id_)
+	constexpr set_id_v(set_id_t id_)
 			: id(id_) {
 	}
 
@@ -30,7 +30,7 @@ constexpr bool operator!=(set_id_v lhs, set_id_v rhs) {
 
 struct binding_id_v {
 	constexpr binding_id_v() = default;
-	constexpr binding_id_v(uint32_t id_)
+	constexpr binding_id_v(binding_id_t id_)
 			: id(id_) {
 	}
 

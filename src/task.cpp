@@ -7,13 +7,15 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <filesystem>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
 #include <fea/maps/unsigned_map.hpp>
 #include <fea/utils/file.hpp>
+#include <fea/utils/scope.hpp>
+#include <filesystem>
+#include <mutex>
+#include <string>
+#include <tbb/spin_mutex.h>
+#include <unordered_map>
+#include <vector>
 #include <vulkan/vulkan.hpp>
 
 namespace vkc {
@@ -24,7 +26,7 @@ struct push_constant_info {
 	binding_id_v binding;
 	size_t offset = 0;
 	size_t byte_size = 0;
-	const void* constant = nullptr;
+	std::vector<uint8_t> constant;
 };
 } // namespace
 
@@ -95,13 +97,14 @@ namespace {
 void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 		const spirv_cross::Compiler& comp) {
 
-	std::vector<buffer_binding> buffer_bindings = reflect_buffer_bindings(comp);
+	std::vector<buffer_binding_info> buffer_bindings
+			= reflect_buffer_bindings(comp);
 
 	// Gathered info to call create once.
 	std::vector<vk::DescriptorSetLayoutBinding> layout_bindings;
 	layout_bindings.reserve(buffer_bindings.size());
 
-	for (const buffer_binding& b : buffer_bindings) {
+	for (const buffer_binding_info& b : buffer_bindings) {
 		// Add empty buffer, ready for future filling.
 		buffer_ids ids{ b.ids.set_id, b.ids.binding_id };
 		impl.transfer_buffers.insert({
@@ -112,28 +115,43 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 
 		/*
 		 Here we specify a binding of type VK_DESCRIPTOR_TYPE_STORAGE_BUFFER to
-		 the binding point. This binds to layout(std140, binding = 0) buffer
+		 the binding point. This binds to layout(std140, binding = N) buffer
 		 buf in the compute shader.
 		*/
 		vk::DescriptorSetLayoutBinding descriptor_set_layout_binding{
 			b.ids.binding_id.id,
 			vk::DescriptorType::eStorageBuffer,
-			1,
+			1, // used for arrays of buffers
 			vk::ShaderStageFlagBits::eCompute,
 		};
 		layout_bindings.push_back(descriptor_set_layout_binding);
 	}
 
 	/*
+	 We create partiallybound binding flags for all compute storage buffers.
+	 These mean we do not have to bind all descriptor sets,
+	 if for example only some buffers are not used while evaling the
+	 shader.
+	*/
+	std::vector<vk::DescriptorBindingFlags> descriptor_sets_binding_flags(
+			layout_bindings.size(),
+			vk::DescriptorBindingFlagBits::ePartiallyBound);
+
+	vk::DescriptorSetLayoutBindingFlagsCreateInfo ds_binding_flag_create_info{
+		descriptor_sets_binding_flags,
+	};
+
+	/*
 	 Here we specify a descriptor set layout. This allows us to bind our
 	 descriptors to resources in the shader.
 	*/
-	std::vector<vk::DescriptorPoolSize> pool_sizes;
 	vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
 		{},
-		uint32_t(layout_bindings.size()),
-		layout_bindings.data(),
+		layout_bindings,
 	};
+
+	// And set the pNext info to add partiallybound flags.
+	descriptor_set_layout_create_info.pNext = &ds_binding_flag_create_info;
 
 	// Create the descriptor set layout.
 	impl.descriptor_set_layouts.push_back(
@@ -145,6 +163,8 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 	 So we will allocate a descriptor set here.
 	 But we need to first create a descriptor pool to do that.
 	*/
+	std::vector<vk::DescriptorPoolSize> pool_sizes;
+
 	vk::DescriptorPoolSize descriptor_pool_size{
 		vk::DescriptorType::eStorageBuffer,
 		uint32_t(layout_bindings.size()),
@@ -154,8 +174,7 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 	vk::DescriptorPoolCreateInfo descriptor_pool_create_info{
 		{},
 		uint32_t(layout_bindings.size()),
-		uint32_t(pool_sizes.size()),
-		pool_sizes.data(),
+		pool_sizes,
 	};
 
 	// create descriptor pool.
@@ -172,8 +191,7 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 
 	vk::DescriptorSetAllocateInfo descriptor_set_allocate_info{
 		impl.descriptor_pool.get(), // pool to allocate from.
-		uint32_t(layouts.size()),
-		layouts.data(),
+		layouts,
 	};
 
 	// allocate descriptor set.
@@ -183,19 +201,19 @@ void gather_buffer_descriptorsets(vkc& vkc_inst, detail::task_impl& impl,
 
 void gather_uniform_descriptorsets(
 		detail::task_impl& impl, const spirv_cross::Compiler& comp) {
-	std::vector<uniform_binding> uniform_bindings
+	std::vector<uniform_binding_info> uniform_bindings
 			= reflect_uniform_bindings(comp);
 
 	// fea::unsigned_map<uint32_t, std::vector<vk::DescriptorSetLayoutBinding>>
 	//		layout_bindings;
 
-	for (const uniform_binding& b : uniform_bindings) {
+	for (const uniform_binding_info& b : uniform_bindings) {
 		impl.push_constants_name_to_info[b.name] = {
 			b.ids.set_id,
 			b.ids.binding_id,
 			b.offset,
 			b.size,
-			nullptr,
+			{},
 		};
 
 		vk::PushConstantRange push_constant_range{
@@ -209,8 +227,8 @@ void gather_uniform_descriptorsets(
 } // namespace
 
 task::~task() = default;
-task::task(task&&) = default;
-task& task::operator=(task&&) = default;
+task::task(task&&) noexcept = default;
+task& task::operator=(task&&) noexcept = default;
 // task::task(const task&) = default;
 // task& task::operator=(const task&) = default;
 
@@ -223,23 +241,24 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 	if (!std::filesystem::exists(shader_filepath)) {
 		fprintf(stderr, "File not found : '%s'\n",
 				shader_filepath.string().c_str());
-		throw std::invalid_argument{ std::string{ __FUNCTION__ }
-			+ " : Invalid shader path, file not found." };
+		fea::maybe_throw<std::invalid_argument>(
+				__FUNCTION__, __LINE__, "Invalid shader path, file not found.");
 	}
 
 	if (shader_filepath.extension() != ".spv") {
 		fprintf(stderr, "Provided file isn't compiled shader (.spv) : '%s'\n",
 				shader_filepath.string().c_str());
-		throw std::invalid_argument{ std::string{ __FUNCTION__ }
-			+ " : Provided shader not '.spv'. Task requires precompiled "
-			  "shaders." };
+		fea::maybe_throw<std::invalid_argument>(__FUNCTION__, __LINE__,
+				"Provided shader not '.spv'. Task requires precompiled "
+				"shaders.");
 	}
 
 	std::vector<uint8_t> shader_data;
 	if (!fea::open_binary_file(shader_filepath, shader_data)) {
 		fprintf(stderr, "Couldn't open shader file : '%s'\n",
 				shader_filepath.string().c_str());
-		throw std::runtime_error{ "Couldn't open shader file." };
+		fea::maybe_throw<std::runtime_error>(
+				__FUNCTION__, __LINE__, "Couldn't open shader file.");
 	}
 
 	// spirv compiler wants data as uint32_t, so pad with zeroes.
@@ -302,10 +321,8 @@ task::task(vkc& vkc_inst, const wchar_t* shader_path)
 
 	vk::PipelineLayoutCreateInfo pipeline_layout_create_info{
 		{},
-		uint32_t(layouts.size()),
-		layouts.data(),
-		uint32_t(_impl->push_constants_ranges.size()),
-		_impl->push_constants_ranges.data(),
+		layouts,
+		_impl->push_constants_ranges,
 	};
 
 	_impl->pipeline_layout = vkc_inst.device().createPipelineLayoutUnique(
@@ -389,6 +406,10 @@ void task::submit(size_t width, size_t height, size_t depth) {
 
 		// start recording commands.
 		_impl->pipeline_submit_cmd.begin(begin_info);
+		fea::on_exit e([this]() {
+			// end recording commands.
+			_impl->pipeline_submit_cmd.end();
+		});
 
 		/*
 		We need to bind a pipeline, AND a descriptor set before we dispatch.
@@ -404,16 +425,16 @@ void task::submit(size_t width, size_t height, size_t depth) {
 		for (std::pair<const std::string, push_constant_info>& kv :
 				_impl->push_constants_name_to_info) {
 			push_constant_info& info = kv.second;
-			if (info.constant == nullptr) {
+			if (info.constant.empty()) {
 				continue;
 			}
 
 			_impl->pipeline_submit_cmd.pushConstants(
 					_impl->pipeline_layout.get(),
 					vk::ShaderStageFlagBits::eCompute, uint32_t(info.offset),
-					uint32_t(info.byte_size), info.constant);
+					uint32_t(info.byte_size), info.constant.data());
 
-			info.constant = nullptr;
+			info.constant.clear();
 		}
 
 		/*
@@ -428,11 +449,7 @@ void task::submit(size_t width, size_t height, size_t depth) {
 		uint32_t z
 				= uint32_t(std::ceil(depth / double(_impl->workgroupsizes[2])));
 		_impl->pipeline_submit_cmd.dispatch(x, y, z);
-
-		// end recording commands.
-		_impl->pipeline_submit_cmd.end();
 	}
-
 	assert(_impl->pipeline_submit_cmd != vk::CommandBuffer{});
 
 	/*
@@ -451,6 +468,7 @@ void task::submit(size_t width, size_t height, size_t depth) {
 	We submit the command buffer on the queue, at the same time giving a
 	fence.
 	*/
+
 	_impl->instance().queue().waitIdle();
 	vk::Result res = _impl->instance().queue().submit(1, &submit_info, {});
 	if (res != vk::Result::eSuccess) {
@@ -467,13 +485,14 @@ void task::push_constant(
 			= _impl->push_constants_name_to_info.at(constant_name);
 
 	if (size != info.byte_size) {
-		throw std::invalid_argument{
-			__FUNCTION__ " : Mismatch between passed in push_constant size and "
-						 "shader size."
-		};
+		fea::maybe_throw<std::invalid_argument>(__FUNCTION__, __LINE__,
+				"Mismatch between passed in push_constant size and "
+				"shader size.");
 	}
 
-	info.constant = val;
+	info.constant.resize(size);
+	const uint8_t* in_data = reinterpret_cast<const uint8_t*>(val);
+	std::copy(in_data, in_data + size, info.constant.begin());
 }
 
 void task::reserve_buffer(const char* buf_name, size_t byte_size) {

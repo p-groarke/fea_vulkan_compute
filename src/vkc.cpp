@@ -1,8 +1,8 @@
 ﻿#include "vkc/vkc.hpp"
 
+#include <fea/utils/throw.hpp>
 #include <filesystem>
 #include <vector>
-
 #include <vulkan/vulkan.hpp>
 
 namespace vkc {
@@ -71,8 +71,8 @@ struct vkc_impl {
 };
 } // namespace detail
 
-vkc::vkc(vkc&&) = default;
-vkc& vkc::operator=(vkc&&) = default;
+vkc::vkc(vkc&&) noexcept = default;
+vkc& vkc::operator=(vkc&&) noexcept = default;
 // vkc::vkc(const vkc&) = default;
 // vkc& vkc::operator=(const vkc&) = default;
 
@@ -131,10 +131,9 @@ vkc::vkc() {
 					});
 
 			if (it == extension_properties.end()) {
-				fprintf(stderr,
+				fea::maybe_throw<std::runtime_error>(__FUNCTION__, __LINE__,
 						"Extension " VK_EXT_DEBUG_UTILS_EXTENSION_NAME " not "
-						"supported\n");
-				std::exit(-1);
+						"supported");
 			}
 
 			_impl->enabled_extensions.push_back(
@@ -202,8 +201,8 @@ vkc::vkc() {
 								"vkCreateDebugUtilsMessengerEXT"));
 
 		if (CreateDebugUtilsMessenger == nullptr) {
-			fprintf(stderr, "Could not load vkCreateDebugUtilsMessengerEXT\n");
-			std::exit(-1);
+			fea::maybe_throw<std::runtime_error>(__FUNCTION__, __LINE__,
+					"Could not load vkCreateDebugUtilsMessengerEXT");
 		}
 
 		// Create and register callback.
@@ -212,8 +211,8 @@ vkc::vkc() {
 				&_impl->debug_utils_messenger);
 
 		if (res != VK_SUCCESS) {
-			fprintf(stderr, "Failed to create debug report callback.\n");
-			exit(-1);
+			fea::maybe_throw<std::runtime_error>(__FUNCTION__, __LINE__,
+					"Failed to create debug report callback.");
 		}
 	}
 
@@ -225,8 +224,8 @@ vkc::vkc() {
 	vkEnumeratePhysicalDevices .
 	*/
 	if (_impl->instance->enumeratePhysicalDevices().size() == 0) {
-		fprintf(stderr, "Could not find a device with vulkan support.\n");
-		std::exit(-1);
+		fea::maybe_throw<std::runtime_error>(__FUNCTION__, __LINE__,
+				"Could not find a device with vulkan support.");
 	}
 
 	/*
@@ -275,12 +274,13 @@ vkc::vkc() {
 			queue_family_properties.end(),
 			[](const vk::QueueFamilyProperties& qfp) {
 				return qfp.queueFlags & vk::QueueFlagBits::eCompute;
+				// Transfer optional (implied) for graphics or compute.
 				//| vk::QueueFlagBits::eTransfer);
 			});
 
 	if (it == queue_family_properties.end()) {
-		fprintf(stderr, "Couldn't find queue family that supports compute.\n");
-		std::exit(-1);
+		fea::maybe_throw<std::runtime_error>(__FUNCTION__, __LINE__,
+				"Couldn't find queue family that supports compute.");
 	}
 
 	_impl->queue_family_idx
@@ -303,22 +303,47 @@ vkc::vkc() {
 	// application, though.
 	vk::PhysicalDeviceFeatures device_features{};
 
+	// Specify any indexing features here. These are now standard in
+	// VK 1.2.
+	vk::PhysicalDeviceDescriptorIndexingFeatures indexing_features{};
+	indexing_features.descriptorBindingPartiallyBound = true;
+
 	/*
 	Now we create the logical device. The logical device allows us to interact
 	with the physical device.
 	*/
 	vk::DeviceCreateInfo device_create_info{
-		{}, 1,
-		&device_queue_create_info, // also specify what queue it has
-		// TODO : debug me
-		// uint32_t(_enabled_layers.size()), // need to specify validation
-		// layers
-
-		//_enabled_layers.data(),
-		// uint32_t(_enabled_extensions.size()),
-		//_enabled_extensions.data(),
-		//&device_features,
+		{},
+		1,
+		// Specify what queue it has
+		&device_queue_create_info,
+		// Validation layers
+		0,
+		nullptr,
+		// Extensions
+		0,
+		nullptr,
+		// Features
+		&device_features,
 	};
+
+	// Set the indexing features (ex, allow partially bound descriptors).
+	device_create_info.pNext = &indexing_features;
+
+	// vk::DeviceCreateInfo device_create_info{
+	//	{},
+	//	1,
+	//	// Specify what queue it has
+	//	&device_queue_create_info,
+	//	// Validation layers
+	//	uint32_t(_impl->enabled_layers.size()),
+	//	_impl->enabled_layers.data(),
+	//	// Extensions
+	//	uint32_t(_impl->enabled_extensions.size()),
+	//	_impl->enabled_extensions.data(),
+	//	// Extra features to enable
+	//	&device_features,
+	//};
 
 	_impl->device
 			= _impl->physical_device.createDeviceUnique(device_create_info);
@@ -338,8 +363,8 @@ vkc::~vkc() {
 								"vkDestroyDebugUtilsMessengerEXT"));
 
 		if (DestroyDebugUtilsMessenger == nullptr) {
-			fprintf(stderr, "Could not load vkDestroyDebugUtilsMessengerEXT\n");
-			std::exit(-1);
+			fea::maybe_throw<std::runtime_error>(__FUNCTION__, __LINE__,
+					"Could not load vkDestroyDebugUtilsMessengerEXT");
 		}
 
 		DestroyDebugUtilsMessenger(

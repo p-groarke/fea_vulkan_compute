@@ -8,7 +8,7 @@ layout(std430, binding = 0) buffer buf1 {
 };
 layout(std430, binding = 1) buffer buf2 {
 	float buf2_data[];
-};
+};// TODO : buffers[5];
 layout(std430, binding = 2) buffer out_buf {
 	float out_data[];
 };
@@ -37,6 +37,7 @@ void main() {
 		for (int i = 0; i < buf1_data.length(); ++i)
 		{
 			out_data[i] = buf1_data[i] + buf2_data[i];
+//			out_data[i] = buf1_data[i] + buffers[0].buf2_data[i];
 		}
 	} break;
 	}
