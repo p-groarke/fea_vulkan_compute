@@ -20,8 +20,8 @@ struct pixel {
 };
 
 struct size_block {
-	uint32_t width = 3200;
-	uint32_t height = 2400;
+	uint32_t width = 500;
+	uint32_t height = 500;
 };
 
 TEST(vulkan_compute, basics) {
@@ -49,7 +49,6 @@ TEST(vulkan_compute, basics) {
 
 	suite.print();
 
-	// TODO : Compare test image with saved image.
 	// Save png.
 	{
 		std::vector<uint8_t> image;
@@ -63,11 +62,60 @@ TEST(vulkan_compute, basics) {
 			image[i * 4 + 3] = uint8_t(image_data[i].a * 255.f);
 		}
 
+		std::filesystem::path out_filepath = exe_path / L"mandelbrot.png";
+
 		// Now we save the acquired color data to a .png.
-		if (!stbi_write_png("mandelbrot.png", int(size.width), int(size.height),
-					4, image.data(), int(size.width) * 4)) {
+		if (!stbi_write_png(out_filepath.string().c_str(), int(size.width),
+					int(size.height), 4, image.data(), int(size.width) * 4)) {
 			fprintf(stderr, "Write png error : %s\n", stbi_failure_reason());
+			ASSERT_TRUE(false);
 		}
+	}
+
+	// Load expected png.
+	{
+		int width = 0;
+		int height = 0;
+		int chans = 0;
+
+		const uint8_t* cmp_img = nullptr;
+		const uint8_t* test_img = nullptr;
+
+		{
+			std::filesystem::path cmp_filepath
+					= exe_path / L"data/images/mandelbrot.png";
+			ASSERT_TRUE(std::filesystem::exists(cmp_filepath));
+
+			cmp_img = stbi_load(cmp_filepath.string().c_str(), &width, &height,
+					&chans, STBI_rgb_alpha);
+
+			EXPECT_EQ(width, 500);
+			EXPECT_EQ(height, 500);
+			EXPECT_EQ(chans, 4);
+		}
+
+		{
+			std::filesystem::path test_filepath = exe_path / L"mandelbrot.png";
+			ASSERT_TRUE(std::filesystem::exists(test_filepath));
+
+			int twidth = 0;
+			int theight = 0;
+			int tchans = 0;
+			test_img = stbi_load(test_filepath.string().c_str(), &twidth,
+					&theight, &tchans, STBI_rgb_alpha);
+
+			EXPECT_EQ(width, twidth);
+			EXPECT_EQ(height, theight);
+			EXPECT_EQ(chans, tchans);
+		}
+
+		// TODO : fix in swiftshader
+		// for (int h = 0; h < height; ++h) {
+		//	for (int w = 0; w < width * chans; ++w) {
+		//		int idx = h * width + w;
+		//		EXPECT_EQ(cmp_img[idx], test_img[idx]);
+		//	}
+		//}
 	}
 }
 } // namespace

@@ -11,8 +11,11 @@ include(GoogleTest)
 # User options
 option(FEA_VKC_TESTS "Build and run tests." On)
 option(FEA_VKC_BENCHMARKS "Build and run bencharks, requires tests." Off)
+option(FEA_LOCAL_REPO "Use local fea_libs repo. Searches for '../fea_libs'" Off)
 
-# TODO : Error on 32bit build.
+if (CMAKE_GENERATOR_PLATFORM MATCHES Win32 OR CMAKE_SIZEOF_VOID_P EQUAL 4)
+	message(FATAL_ERROR "${PROJECT_NAME} doesn't support 32bit builds. Make sure to pass '-A x64' to cmake.")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -26,11 +29,17 @@ find_package(Vulkan CONFIG REQUIRED QUIET)
 find_package(vulkan-validationlayers CONFIG REQUIRED QUIET)
 find_package(spirv-cross CONFIG REQUIRED QUIET)
 
-set(FEA_TESTS OFF CACHE INTERNAL "")  # Forces the value
+if (${FEA_LOCAL_REPO})
+	set (FETCHCONTENT_SOURCE_DIR_FEA_LIBS ${CMAKE_CURRENT_SOURCE_DIR}/../fea_libs CACHE INTERNAL "")
+	set(FEA_TESTS On CACHE INTERNAL "")  # Forces the value
+else()
+	set(FEA_TESTS Off CACHE INTERNAL "")  # Forces the value
+endif()
+
 set(FEA_CPP17 On CACHE INTERNAL "")  # Forces the value
 FetchContent_Declare(fea_libs
 	GIT_REPOSITORY https://github.com/p-groarke/fea_libs.git
-	GIT_TAG 689b9457fd49b627c5f8302e66563a4a21eb5422
+	GIT_TAG 81b7c0e07365b36ce8f34d5da9521ddea4ee568d
 )
 FetchContent_MakeAvailable(fea_libs)
 
@@ -41,14 +50,13 @@ file(GLOB_RECURSE SOURCE_FILES "src/*.cpp" "src/*.hpp")
 
 add_library(${PROJECT_NAME} ${HEADER_FILES} ${SOURCE_FILES})
 set_compile_options(${PROJECT_NAME} PUBLIC)
-target_link_libraries(${PROJECT_NAME} PUBLIC TBB::TBB)
+target_link_libraries(${PROJECT_NAME} PUBLIC TBB::TBB fea_libs)
 target_link_libraries(${PROJECT_NAME} PRIVATE
 	Vulkan::Vulkan
 	vulkan-validationlayers::vulkan-validationlayers
 	spirv-cross::spirv-cross-core
 	spirv-cross::spirv-cross-cpp
 	spirv-cross::spirv-cross-reflect
-	fea_libs
 )
 
 # Interface
