@@ -18,6 +18,7 @@
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
+namespace fea {
 namespace vkc {
 namespace {
 // A push constant (aka uniform).
@@ -541,3 +542,4 @@ void task::pull_buffer(const char* buf_name, uint8_t* out_data) {
 }
 
 } // namespace vkc
+} // namespace fea

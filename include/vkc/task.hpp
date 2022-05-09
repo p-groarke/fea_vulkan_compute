@@ -37,6 +37,7 @@
 #include <fea/memory/pimpl_ptr.hpp>
 #include <vector> // todo : span
 
+namespace fea {
 namespace vkc {
 struct vkc;
 
@@ -129,3 +130,4 @@ void task::pull_buffer(const char* buf_name, std::vector<T>* out_data) {
 	pull_buffer(buf_name, reinterpret_cast<uint8_t*>(out_data->data()));
 }
 } // namespace vkc
+} // namespace fea

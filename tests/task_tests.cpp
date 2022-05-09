@@ -7,6 +7,8 @@
 extern const char* argv0;
 
 namespace {
+namespace vkc = fea::vkc;
+
 struct p_constants {
 	uint32_t test_num = 0;
 	float mul = 0.f;
