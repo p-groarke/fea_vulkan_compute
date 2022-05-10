@@ -12,6 +12,8 @@
 extern const char* argv0;
 
 namespace {
+namespace vkc = fea::vkc;
+
 struct pixel {
 	float r = 0.f;
 	float g = 0.f;

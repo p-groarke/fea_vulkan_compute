@@ -5,6 +5,7 @@
 #include <fea/utils/throw.hpp>
 #include <vulkan/vulkan.hpp>
 
+namespace fea {
 namespace vkc {
 namespace detail {
 // Pass in the gpu instance, the buffer for which this memory will be
@@ -251,3 +252,4 @@ private:
 	vk::UniqueDeviceMemory _mem;
 };
 } // namespace vkc
+} // namespace fea

@@ -42,12 +42,14 @@ class Device;
 class Queue;
 } // namespace vk
 
+namespace fea {
 namespace vkc {
 namespace detail {
 struct vkc_impl;
 }
 
 // Initializes vulkan and stores the global state.
+// This is your GPU logical device.
 struct vkc : fea::pimpl_ptr<detail::vkc_impl> {
 	vkc();
 	~vkc();
@@ -77,3 +79,4 @@ struct vkc : fea::pimpl_ptr<detail::vkc_impl> {
 };
 
 } // namespace vkc
+} // namespace fea

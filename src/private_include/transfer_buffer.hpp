@@ -7,6 +7,7 @@
 #include <limits>
 #include <vulkan/vulkan.hpp>
 
+namespace fea {
 namespace vkc {
 namespace detail {
 constexpr vk::BufferUsageFlags staging_usage_flags
@@ -275,3 +276,4 @@ void make_pull_cmds(const vkc& vkc_inst, vk::CommandPool command_pool,
 	buf.make_pull_cmd(std::move(new_buf.back()));
 }
 } // namespace vkc
+} // namespace fea

@@ -5,6 +5,7 @@
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
+namespace fea {
 namespace vkc {
 namespace {
 #if defined(NDEBUG)
@@ -405,3 +406,4 @@ uint32_t vkc::queue_family() const {
 }
 
 } // namespace vkc
+} // namespace fea

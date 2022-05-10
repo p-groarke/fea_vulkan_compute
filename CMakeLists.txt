@@ -1,5 +1,3 @@
-include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.global.txt)
-
 cmake_minimum_required (VERSION 3.21)
 project(fea_vkc VERSION 1.0.0 LANGUAGES CXX)
 
@@ -11,7 +9,8 @@ include(GoogleTest)
 # User options
 option(FEA_VKC_TESTS "Build and run tests." On)
 option(FEA_VKC_BENCHMARKS "Build and run bencharks, requires tests." Off)
-option(FEA_LOCAL_REPO "Use local fea_libs repo. Searches for '../fea_libs'" Off)
+option(FEA_LIBS_LOCAL "Use local fea_libs repo. Searches for '../fea_libs'" Off)
+option(FEA_CMAKE_LOCAL "Use local fea_cmake repo. Searches for '../fea_cmake'" Off)
 
 if (CMAKE_GENERATOR_PLATFORM MATCHES Win32 OR CMAKE_SIZEOF_VOID_P EQUAL 4)
 	message(FATAL_ERROR "${PROJECT_NAME} doesn't support 32bit builds. Make sure to pass '-A x64' to cmake.")
@@ -19,11 +18,24 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Pull fea_cmake helper library.
+if (${FEA_CMAKE_LOCAL})
+	set(FETCHCONTENT_SOURCE_DIR_FEA_CMAKE ${CMAKE_CURRENT_SOURCE_DIR}/../fea_cmake CACHE INTERNAL "")
+endif()
+FetchContent_Declare(fea_cmake
+	GIT_REPOSITORY https://github.com/p-groarke/fea_cmake.git
+	GIT_TAG main
+)
+FetchContent_MakeAvailable(fea_cmake)
+
+# Include cmake helpers.
+include(${fea_cmake_SOURCE_DIR}/CMakeLists.txt)
+
 # Output to predictable location.
-set_output_dir(${CMAKE_BINARY_DIR}/bin)
+fea_set_output_dir(${CMAKE_BINARY_DIR}/bin)
 
 # External dependencies.
-pull_conan()
+fea_pull_conan()
 find_package(TBB CONFIG REQUIRED QUIET)
 find_package(Vulkan CONFIG REQUIRED QUIET)
 find_package(vulkan-validationlayers CONFIG REQUIRED QUIET)
@@ -39,7 +51,7 @@ endif()
 set(FEA_CPP17 On CACHE INTERNAL "")  # Forces the value
 FetchContent_Declare(fea_libs
 	GIT_REPOSITORY https://github.com/p-groarke/fea_libs.git
-	GIT_TAG 81b7c0e07365b36ce8f34d5da9521ddea4ee568d
+	GIT_TAG ca37b5776f01e023bb449765fabd6e26e6b2ec6b
 )
 FetchContent_MakeAvailable(fea_libs)
 
@@ -49,7 +61,7 @@ file(GLOB_RECURSE HEADER_FILES "include/${INCLUDE_NAME}/*.hpp")
 file(GLOB_RECURSE SOURCE_FILES "src/*.cpp" "src/*.hpp")
 
 add_library(${PROJECT_NAME} ${HEADER_FILES} ${SOURCE_FILES})
-set_compile_options(${PROJECT_NAME} PUBLIC)
+fea_set_compile_options(${PROJECT_NAME} PUBLIC)
 target_link_libraries(${PROJECT_NAME} PUBLIC TBB::TBB fea_libs)
 target_link_libraries(${PROJECT_NAME} PRIVATE
 	Vulkan::Vulkan
@@ -103,7 +115,7 @@ if (${FEA_VKC_TESTS})
 	set(TEST_NAME ${PROJECT_NAME}_tests)
 	file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp" "tests/*.hpp")
 	add_executable(${TEST_NAME} ${TEST_SOURCES} ${TEST_HEADERS})
-	set_compile_options(${TEST_NAME} PRIVATE)
+	fea_set_compile_options(${TEST_NAME} PRIVATE)
 	target_link_libraries(${TEST_NAME} GTest::gtest stb::stb fea_vkc fea_libs)
 
 	source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/tests PREFIX "Source Files" FILES ${TEST_SOURCES})

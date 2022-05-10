@@ -1,5 +1,6 @@
 #pragma once
 
+namespace fea {
 namespace vkc {
 // For readability & type safety.
 using set_id_t = uint32_t;
@@ -63,3 +64,4 @@ struct buffer_ids {
 };
 
 } // namespace vkc
+} // namespace fea

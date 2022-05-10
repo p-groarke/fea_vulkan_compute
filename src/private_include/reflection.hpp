@@ -11,6 +11,7 @@
 #include <spirv_cross.hpp>
 #include <vulkan/vulkan.hpp>
 
+namespace fea {
 namespace vkc {
 struct buffer_binding_info {
 	buffer_ids ids;
@@ -134,3 +135,4 @@ std::array<uint32_t, 3> reflect_workinggroup_sizes(
 }
 
 } // namespace vkc
+} // namespace fea
